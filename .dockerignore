@@ -1,0 +1,34 @@
+# Build artifacts
+bin/
+*.test
+*.exe
+*.prof
+coverage.out
+coverage.html
+
+# VCS, CI, IDE, OS
+.git/
+.github/
+.idea/
+.vscode/
+.DS_Store
+
+# Local credentials / config (must NEVER end up in the image)
+auditor.yaml
+.auditor.yaml
+*.env
+*.pem
+*.key
+
+# Docs and planning — not needed at build time
+*.md
+docs/
+
+# Other deploy targets — image build only needs deploy/docker/
+deploy/helm/
+
+# Lint config — not needed at build time
+.golangci.yml
+
+# Plan / claude / agent state
+.claude/

@@ -41,13 +41,21 @@ lint:
 run *ARGS:
     go run ./cmd/auditor {{ARGS}}
 
-# Build the multi-stage container image. Recipe is included in Phase 1 for
-# parity with the plan; the actual Dockerfile lands in Phase 6.
+# Build the multi-stage container image. Tags both :{{VERSION}} (immutable)
+# and :latest (convenient for local docker-run).
 docker:
     docker build \
         --build-arg VERSION={{VERSION}} \
+        --build-arg COMMIT={{COMMIT}} \
+        --build-arg DATE={{DATE}} \
         -t cloud-asset-auditor:{{VERSION}} \
+        -t cloud-asset-auditor:latest \
         -f deploy/docker/Dockerfile .
+
+# Run the built image. Defaults to serve mode on port 8080; override with
+# extra args, e.g. `just docker-run audit --provider none -o json`.
+docker-run *ARGS:
+    docker run --rm -it -p 8080:8080 cloud-asset-auditor:latest {{ARGS}}
 
 # Tidy go.mod / go.sum (generates go.sum on first run).
 tidy:

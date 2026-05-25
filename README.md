@@ -4,13 +4,14 @@ Single-binary CLI (and, eventually, web UI) that inventories cloud assets
 across OCI, Cloudflare, and Kubernetes into one canonical schema, with
 JSON or CSV output.
 
-> **Status: Phases 1–5.** Shipped: foundation, JSON / CSV renderers, CLI,
+> **Status: Phases 1–6.** Shipped: foundation, JSON / CSV renderers, CLI,
 > Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartments +
 > regions + Compute + Load Balancers; 15 stubs), Kubernetes provider
-> (universal via dynamic-client + discovery), and the web UI (`auditor serve`
+> (universal via dynamic-client + discovery), the web UI (`auditor serve`
 > — embedded SPA, SSE-streamed audits, CSV/JSON export, optional basic/token
-> auth). Docker (Phase 6) is next. See [`init-plan.md`](./init-plan.md) for
-> the full phased plan and [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
+> auth), and the Docker image (multi-stage build → distroless static, non-root).
+> Helm chart (Phase 7) is next. See [`init-plan.md`](./init-plan.md) for the
+> full phased plan and [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
 
 ## Install
 
@@ -92,6 +93,36 @@ Endpoints:
 Production deployments should sit behind a real reverse proxy (TLS
 termination, rate-limiting, IP allowlist). Built-in `basic` / `token`
 are a backstop for unmanaged setups, not a substitute.
+
+## Container
+
+```bash
+just docker                                # → cloud-asset-auditor:<version> + :latest
+docker images cloud-asset-auditor:latest   # confirm size
+
+# Print help (default CMD).
+docker run --rm cloud-asset-auditor:latest
+
+# CLI mode — credentials passed via env / mounted config.
+docker run --rm \
+  -e CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN \
+  cloud-asset-auditor:latest audit --provider cloudflare -o json
+
+# Web UI mode — port 8080 + a healthcheck.
+docker run --rm -p 8080:8080 cloud-asset-auditor:latest serve --addr :8080
+curl http://localhost:8080/healthz       # → ok
+
+# Read-only filesystem + non-root, the way Kubernetes will run it.
+docker run --rm --read-only --user 65532:65532 \
+  cloud-asset-auditor:latest audit --provider none -o json
+```
+
+Image notes:
+
+- **Base**: `gcr.io/distroless/static-debian12:nonroot` (~2 MB; no shell, no package manager, no glibc).
+- **User**: `nonroot` (UID/GID 65532). Mounted volumes (kubeconfig, OCI config) must be readable by that UID.
+- **Architecture**: build inherits `$TARGETARCH` from `docker build --platform`; the CI workflow in Phase 8 will produce multi-arch (`linux/amd64`, `linux/arm64`) tags.
+- **Size**: ~75 MB. The plan called for <30 MB; in practice the three production SDKs (cloudflare-go/v4, oci-go-sdk/v65, k8s client-go) make that target unachievable without ripping providers out. Documented in `CLAUDE.md` and the Dockerfile.
 
 Minimum permissions for what's implemented today:
 
@@ -187,7 +218,7 @@ A full extending guide ships in Phase 9.
 | 3 — OCI provider            | partial  | Compartment recursion + region resolution + Compute + Load Balancers implemented; Block / Boot volumes, VCNs, Subnets, Object Storage, Autonomous DBs, DB Systems, Functions, Container Instances, OKE, Vaults, Policies, Users, Groups, Dynamic Groups stubbed |
 | 4 — Kubernetes provider     | shipped  | Dynamic-client + discovery — every built-in resource type and every CRD with no per-resource code. `--kube-context`, `--kube-namespace`, `--kube-exclude-namespaces` honored; per-GVR Forbidden tolerated; aggregated-API discovery failures degrade to warnings |
 | 5 — Web UI                  | shipped  | Embedded SPA + JSON/SSE API. `auditor serve --addr ... --auth none\|basic\|token`. Streamed asset table, filter / sort / type+provider facets, CSV/JSON export, graceful shutdown. Plain JS rather than the planned Alpine.js — keeps the binary fully self-contained |
-| 6 — Docker                  | planned  | Distroless multi-stage, < 30 MB, non-root |
+| 6 — Docker                  | shipped  | Multi-stage build → `gcr.io/distroless/static-debian12:nonroot`. Non-root (UID 65532), reproducible-ish (`-trimpath`, ldflags-injected version), accepts `--platform` for multi-arch. ~75 MB rather than the plan's <30 MB target (cloudflare-go/v4 + oci-go-sdk/v65 + k8s client-go are large) |
 | 7 — Helm chart              | planned  | CronJob and Deployment modes, BYO secrets |
 | 8 — GitHub Actions          | planned  | CI, goreleaser, multi-arch GHCR image, reusable composite action |
 | 9 — Docs                    | planned  | Per-provider IAM minimums, extending guide, generated CLI docs |
