@@ -17,3 +17,17 @@ type Provider interface {
 	// emit one per recoverable failure and continue.
 	Collect(ctx context.Context) (<-chan Asset, <-chan error)
 }
+
+// ConcurrencyConfigurable is an optional interface providers may implement
+// to receive --max-concurrency before Collect. The CLI type-asserts every
+// provider against this and calls SetMaxConcurrency when the assertion holds.
+type ConcurrencyConfigurable interface {
+	SetMaxConcurrency(n int)
+}
+
+// IncludeRawConfigurable is the parallel optional interface for --include-raw.
+// Providers that can attach the upstream payload to Asset.Raw implement this;
+// the CLI calls SetIncludeRaw before Collect when the assertion holds.
+type IncludeRawConfigurable interface {
+	SetIncludeRaw(b bool)
+}

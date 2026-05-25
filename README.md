@@ -4,10 +4,14 @@ Single-binary CLI (and, eventually, web UI) that inventories cloud assets
 across OCI, Cloudflare, and Kubernetes into one canonical schema, with
 JSON or CSV output.
 
-> **Status: Phase 1 — foundation.** The core types, two renderers, and the
-> full CLI surface are in place. No providers are wired up yet — Cloudflare
-> is next (Phase 2). See [`init-plan.md`](./init-plan.md) for the full
-> phased plan and [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
+> **Status: Phase 2 — Cloudflare provider in flight.** Foundation, renderers,
+> CLI, and Cloudflare zones + DNS records are shipped. Eleven other Cloudflare
+> resource types (R2, KV, Workers, Pages, Access, Tunnels, Load Balancers,
+> Rulesets, Page Rules, D1, Certificates) are stubbed in
+> `internal/providers/cloudflare/stubs.go` for incremental fill-in.
+> OCI (Phase 3) and Kubernetes (Phase 4) are not started. See
+> [`init-plan.md`](./init-plan.md) for the full phased plan and
+> [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
 
 ## Install
 
@@ -25,18 +29,28 @@ Phase 8.
 
 ## Quick start
 
-Phase 1 has no providers, so the only audit path that returns data today
-is the no-providers path — useful as a smoke test of the pipeline:
-
 ```bash
+# Phase 2: real audit against Cloudflare. Lists zones + DNS records today;
+# the other 11 resource types are stubs that emit nothing yet.
+export CLOUDFLARE_API_TOKEN=cf-token-with-zone-read-and-dns-read
+./bin/auditor audit --provider cloudflare -o json
+./bin/auditor audit --provider cloudflare -o csv > assets.csv
+./bin/auditor audit --provider cloudflare --include-raw -o json   # keeps the full SDK payload in each Asset.Raw
+
+# No-provider path (useful for smoke tests):
 ./bin/auditor audit --provider none -o json     # → []
 ./bin/auditor audit --provider none -o csv      # → header row only
-./bin/auditor audit --provider none -o json --stream   # → (empty)
+
 ./bin/auditor version
-./bin/auditor providers                         # → (no providers registered)
+./bin/auditor providers                         # → cloudflare
 ./bin/auditor --help                            # full CLI surface
 ./bin/auditor audit --help                      # all audit flags
 ```
+
+The minimum Cloudflare API-token scopes for the current implementation
+are **Zone:Read** and **Zone.DNS:Read** at the account level. As more
+resource types come online they'll need additional scopes — the full
+permission set will land in `docs/providers.md` (Phase 9).
 
 The complete flag surface (including provider-scoped flags like
 `--oci-regions`, `--kube-context`, `--max-concurrency`, `--include-raw`)
@@ -120,7 +134,7 @@ A full extending guide ships in Phase 9.
 | Phase | Status   | Scope |
 | ----- | -------- | ----- |
 | 1 — Foundation              | shipped  | Core types, JSON / CSV renderers, CLI skeleton, version, justfile |
-| 2 — Cloudflare provider     | next     | Token auth; zones, DNS, Workers, R2, KV, D1, Pages, Access, Tunnels |
+| 2 — Cloudflare provider     | partial  | Zones + DNS records implemented; R2 / KV / Workers / D1 / Pages / Access / Tunnels / Load Balancers / Rulesets / Page Rules / Certificates stubbed |
 | 3 — OCI provider            | planned  | Compartment-recursive, multi-region, instance + resource principal auth |
 | 4 — Kubernetes provider     | planned  | Dynamic-client discovery so CRDs come along for free |
 | 5 — Web UI                  | planned  | SSE stream, embedded HTML + Alpine, no build step |

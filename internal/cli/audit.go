@@ -33,6 +33,8 @@ func newAuditCmd(s *cliState) *cobra.Command {
 			outFile := v.GetString("output-file")
 			stream := v.GetBool("stream")
 			timeout := v.GetDuration("timeout")
+			maxConcurrency := v.GetInt("max-concurrency")
+			includeRaw := v.GetBool("include-raw")
 
 			renderer, err := buildRenderer(format, stream)
 			if err != nil {
@@ -49,6 +51,7 @@ func newAuditCmd(s *cliState) *cobra.Command {
 			defer cancel()
 
 			selected := selectProviders(providers)
+			applyProviderOptions(selected, maxConcurrency, includeRaw)
 			assets, errs := runProviders(ctx, selected)
 
 			// Drain provider errors in the background so the renderer
@@ -123,6 +126,20 @@ func openOutput(path string) (io.Writer, func(), error) {
 		return nil, nil, fmt.Errorf("create output file: %w", err)
 	}
 	return f, func() { _ = f.Close() }, nil
+}
+
+// applyProviderOptions pushes --max-concurrency and --include-raw into any
+// provider that opted into the corresponding Configurable interface. Providers
+// that didn't are silently skipped — these are knobs, not requirements.
+func applyProviderOptions(providers []core.Provider, maxConcurrency int, includeRaw bool) {
+	for _, p := range providers {
+		if c, ok := p.(core.ConcurrencyConfigurable); ok {
+			c.SetMaxConcurrency(maxConcurrency)
+		}
+		if c, ok := p.(core.IncludeRawConfigurable); ok {
+			c.SetIncludeRaw(includeRaw)
+		}
+	}
 }
 
 // selectProviders resolves the requested provider names into instantiated

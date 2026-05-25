@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-This is a **greenfield project**. The only artifact present is `init-plan.md`, a phased implementation spec for building "Cloud Asset Auditor" — a CLI + web UI that inventories assets across OCI, Cloudflare, and Kubernetes. There is no `go.mod`, no source tree, no `Makefile`, no tests.
+**Phases 1–2 (partial) are shipped.** The foundation, JSON/CSV renderers, full CLI, and the Cloudflare provider (zones + DNS implemented; 11 other resources stubbed in `internal/providers/cloudflare/stubs.go`) are in place. OCI (Phase 3), Kubernetes (Phase 4), and the web UI (Phase 5) are not started.
 
-**Before doing anything substantive, read `init-plan.md` end-to-end.** It is the single source of truth for the language choice, layout, abstractions, and phase ordering. Do not invent architecture that contradicts it.
+**Before doing anything substantive, read `init-plan.md` end-to-end.** It is the single source of truth for the layout, abstractions, and phase ordering. Do not invent architecture that contradicts it.
 
 ## Build / test / lint
 
-None of these exist yet. They will be added in Phase 1 (`Makefile` targets: `build`, `test`, `lint`, `run`, `docker`). Once present, prefer the `Makefile` targets over raw `go` commands so behavior stays consistent with CI.
+The project uses **`just`** (not `make`) as the task runner. Standard recipes: `just build`, `just test`, `just test-update`, `just lint`, `just tidy`, `just run -- <args>`, `just smoke`. Run `just` with no args to list them. Prefer recipes over raw `go` commands so behavior stays consistent across machines and CI.
+
+**SDK choice deviation from the plan:** Phase 2 uses `github.com/cloudflare/cloudflare-go/v4` (the current production generated SDK), not `v2` as init-plan.md §3 specifies — `v2` was an early-access generated SDK that's been superseded. The `v4` API uses `cloudflare.F(value)` to wrap required params and an `AutoPager` iterator pattern (`iter.Next()` / `iter.Current()` / `iter.Err()`).
 
 ## Architecture (from `init-plan.md`)
 
@@ -20,7 +22,14 @@ The plan is Go-first (see §0 for the rationale; Python is an explicit fallback 
 - **`core.Provider`** — `Validate(ctx)` + `Collect(ctx) (<-chan Asset, <-chan error)`. Channels are mandatory, not optional: streaming keeps memory bounded against large K8s clusters (50k+ objects) and lets the UI render rows as they arrive.
 - **`output.Renderer`** — consumes the asset channel and writes to an `io.Writer`. JSON (array or NDJSON via `--stream`) and CSV (flattens `Tags` into one column).
 
-Providers register themselves into a `registry` map so the CLI can enumerate and select them by name (`--provider oci,cloudflare`).
+Providers register themselves into a `registry` map (via package `init()`) so the CLI can enumerate and select them by name (`--provider oci,cloudflare`). New providers are wired into the binary by adding a blank import to `cmd/auditor/main.go` — that's the only place new providers need to be touched outside their own package.
+
+Two **optional** interfaces on the provider side let the CLI push knob values without changing the base contract:
+
+- `core.ConcurrencyConfigurable` — `SetMaxConcurrency(int)`; receives `--max-concurrency` before `Collect`.
+- `core.IncludeRawConfigurable` — `SetIncludeRaw(bool)`; receives `--include-raw`.
+
+Providers that don't care simply omit the methods. `internal/cli/audit.go::applyProviderOptions` type-asserts both and is a no-op when the assertion fails.
 
 ### Provider-specific gotchas baked into the plan
 
