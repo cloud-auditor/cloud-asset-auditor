@@ -1,0 +1,3 @@
+provider,account_id,region,type,id,name,status,created_at,tags
+cloudflare,acct1,,cloudflare.zone,zone-1,example.com,active,2025-01-02T03:04:05Z,env=prod;team=platform
+kubernetes,kind-test,local,v1.Pod,uid-2,nginx-abc,Running,,
