@@ -262,6 +262,66 @@ Internally it downloads the matching release binary (pinned by action ref) and r
 - `docs/providers.md` — per-provider auth setup, required permissions (the *minimum* IAM policy for each), resource list.
 - `docs/extending.md` — how to add a new provider in <100 lines. Walk through the `Provider` interface with a worked example.
 
+### Phase 10 — Network topology visualization
+
+Phases 2–4 give a flat list of assets. Phase 10 infers the **request-path edges** between them and renders an interactive graph: trace a single hostname from its public DNS record, through CDN/security layers, into a cloud load balancer, across the cluster gateway, to the backing service.
+
+Canonical flow (used as the test fixture and doc example):
+
+```
+DNS (Cloudflare zone + record)
+  → Security rules (CF Rulesets, Access apps, Tunnels)
+    → Cloud-provider LB (OCI Load Balancer)
+      → Gateway (K8s Gateway API or Ingress)
+        → Service (K8s Service)
+          → Pods (informational endpoint; not traversed further)
+```
+
+**Data model.** Introduce an `Edge` type alongside `Asset` — derived, never produced by a provider directly:
+
+```go
+// internal/core/edge.go
+type Edge struct {
+    From       AssetRef `json:"from"`        // {Provider, AccountID, Type, ID}
+    To         AssetRef `json:"to"`
+    Kind       string   `json:"kind"`        // "dns" | "waf" | "lb-backend" | "gateway-route" | "service-backend"
+    Hostname   string   `json:"hostname,omitempty"`
+    Port       int      `json:"port,omitempty"`
+    Confidence string   `json:"confidence"`  // "exact" (matched ID) | "heuristic" (matched IP/hostname)
+}
+```
+
+A new `internal/topology` package consumes the collected `[]Asset` and emits `[]Edge` via per-kind resolvers:
+
+- `dnsToTarget` — match each CF DNS record's content (IP or CNAME) to an LB hostname/IP.
+- `wafBinding` — attach CF Rulesets, Access apps, and Tunnels to the zone they protect.
+- `lbToGateway` — match OCI LB backend-pool members to K8s LoadBalancer-Service IPs / NodePorts.
+- `gatewayToService` — walk `HTTPRoute` / `Ingress` rules to the backing Services.
+
+Matching is best-effort and **explicit about confidence**: an OCID embedded in a Service annotation is `exact`; an IP/hostname-only match is `heuristic`. The UI styles them differently so users know which edges are guesses.
+
+**CLI surface:**
+
+```
+auditor topology [flags]
+  --hostname strings    # trace these hostnames only (default: all DNS records)
+  --output string       # json|dot|mermaid (default "json")
+  --include-orphans     # also emit asset nodes that have no edges
+```
+
+The default JSON shape is `{"nodes": [...assets], "edges": [...edges]}` — feeds both the web UI and downstream tools. `dot` and `mermaid` produce text graphs you can paste into Graphviz / Mermaid renderers, which is what most runbooks and PR descriptions actually need.
+
+**Web UI integration.** Add a `Topology` tab to the Phase 5 single-page UI. Render with [Cytoscape.js](https://js.cytoscape.org/) (~250 KB minified, vendored into `web/vendor/` so there's still no build step). Click a node → side panel shows the full `Asset`; click an edge → shows `Edge` metadata. A "trace from hostname" input filters the graph to the connected component reachable from one DNS record — the primary debugging use case.
+
+**Exit criteria:** against a test environment with at least one CF zone, one OCI LB, and one K8s Gateway-fronted Service, `auditor topology --hostname example.com -o dot | dot -Tsvg > flow.svg` produces a Graphviz file that, when rendered, shows the full chain `DNS → Rulesets → LB → Gateway → Service` with at least one edge of each kind annotated by confidence.
+
+**Things to get right early in this phase:**
+
+1. **Don't fail on missing data.** If the user hasn't run Phase 4 yet, just emit the partial graph. Same partial-failure semantics as `auditor audit`.
+2. **Resolvers are pluggable.** Each edge kind is its own function so adding new connection types (service mesh, private endpoints, peering links) doesn't touch the others.
+3. **Index once.** A naive O(n²) join across thousands of assets is a non-starter. Build `map[string][]AssetRef` keyed by IP and hostname once, then look up.
+4. **Annotate confidence.** Heuristic matches are inevitable across cloud boundaries; never silently promote them to `exact`.
+
 ---
 
 ## 4. CLI surface (final shape)

@@ -128,6 +128,7 @@ A full extending guide ships in Phase 9.
 | 7 — Helm chart              | planned  | CronJob and Deployment modes, BYO secrets |
 | 8 — GitHub Actions          | planned  | CI, goreleaser, multi-arch GHCR image, reusable composite action |
 | 9 — Docs                    | planned  | Per-provider IAM minimums, extending guide, generated CLI docs |
+| 10 — Network topology       | planned  | Infer edges between assets; trace `DNS → security → LB → gateway → service` as JSON / Graphviz / Cytoscape view |
 
 ## License
 
