@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-**Phases 1–4 (partial) are shipped.** Foundation, JSON/CSV renderers, full CLI, Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartment recursion + region resolution + Compute + Load Balancers; 15 stubs), and Kubernetes provider (universal — dynamic client + discovery means every resource type including CRDs is inventoried automatically) are in place. Web UI (Phase 5) is not started.
+**Phases 1–5 are shipped.** Foundation, JSON/CSV renderers, full CLI, Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartment recursion + region resolution + Compute + Load Balancers; 15 stubs), Kubernetes provider (universal via dynamic client + discovery), and the web UI (`auditor serve` — embedded SPA, SSE-streamed audits, CSV/JSON export, optional basic/token auth). Docker (Phase 6) is next.
 
 **Before doing anything substantive, read `init-plan.md` end-to-end.** It is the single source of truth for the layout, abstractions, and phase ordering. Do not invent architecture that contradicts it.
 
@@ -13,6 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The project uses **`just`** (not `make`) as the task runner. Standard recipes: `just build`, `just test`, `just test-update`, `just lint`, `just tidy`, `just run -- <args>`, `just smoke`. Run `just` with no args to list them. Prefer recipes over raw `go` commands so behavior stays consistent across machines and CI.
 
 **SDK choice deviation from the plan:** Phase 2 uses `github.com/cloudflare/cloudflare-go/v4` (the current production generated SDK), not `v2` as init-plan.md §3 specifies — `v2` was an early-access generated SDK that's been superseded. The `v4` API uses `cloudflare.F(value)` to wrap required params and an `AutoPager` iterator pattern (`iter.Next()` / `iter.Current()` / `iter.Err()`).
+
+**Phase 5 frontend deviation:** init-plan.md specifies Alpine.js. The shipped UI is plain vanilla JS instead — keeps the binary self-contained without vendoring third-party JS, smaller payload, simpler review surface. Same feature set: SSE streaming, sort, filter, provider/type facets, CSV/JSON export, sticky header. Lives in `internal/server/web/` (the plan put `web/` at the repo root; embedded assets are conventionally placed inside the package that uses them in Go).
 
 ## Architecture (from `init-plan.md`)
 

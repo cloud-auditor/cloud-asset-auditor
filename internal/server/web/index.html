@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cloud Asset Auditor</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<header class="bar">
+  <h1>Cloud Asset Auditor</h1>
+  <div class="grow"></div>
+  <span id="health-pill" class="pill pill-muted">checking…</span>
+</header>
+
+<section class="bar bar-controls">
+  <fieldset id="providers-fs">
+    <legend>Providers</legend>
+    <div id="providers-list"><span class="muted">loading…</span></div>
+  </fieldset>
+
+  <div class="action-group">
+    <button id="run-btn" type="button">Run audit</button>
+    <button id="stop-btn" type="button" hidden>Stop</button>
+  </div>
+
+  <div class="grow"></div>
+
+  <div class="action-group">
+    <button id="export-csv-btn" type="button">Export CSV</button>
+    <button id="export-json-btn" type="button">Export JSON</button>
+  </div>
+</section>
+
+<section class="bar bar-status">
+  <span id="status">Idle.</span>
+  <div class="grow"></div>
+  <input id="filter" type="search" placeholder="filter assets (substring match across all columns)…" />
+</section>
+
+<section class="layout">
+  <aside id="facets" class="facets">
+    <h2>Type</h2>
+    <ul id="facet-types" class="facet-list"></ul>
+    <h2>Provider</h2>
+    <ul id="facet-providers" class="facet-list"></ul>
+  </aside>
+
+  <div class="table-wrap">
+    <table id="assets">
+      <thead>
+        <tr>
+          <th data-key="provider"  >Provider</th>
+          <th data-key="type"      >Type</th>
+          <th data-key="account_id">Account</th>
+          <th data-key="region"    >Region</th>
+          <th data-key="name"      >Name</th>
+          <th data-key="status"    >Status</th>
+          <th data-key="id"        >ID</th>
+        </tr>
+      </thead>
+      <tbody id="assets-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<section id="errors" class="errors" hidden>
+  <h2>Errors</h2>
+  <ul id="errors-list"></ul>
+</section>
+
+<script src="/app.js"></script>
+</body>
+</html>

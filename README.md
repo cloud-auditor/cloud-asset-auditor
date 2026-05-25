@@ -4,13 +4,13 @@ Single-binary CLI (and, eventually, web UI) that inventories cloud assets
 across OCI, Cloudflare, and Kubernetes into one canonical schema, with
 JSON or CSV output.
 
-> **Status: Phases 1–4 partial.** Shipped: foundation, JSON / CSV renderers,
-> CLI, Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartments +
-> regions + Compute + Load Balancers; 15 stubs), and Kubernetes provider
-> (universal — uses dynamic client + discovery so every built-in type and CRD
-> is inventoried with zero per-resource code). Web UI (Phase 5) is not started.
-> See [`init-plan.md`](./init-plan.md) for the full phased plan and
-> [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
+> **Status: Phases 1–5.** Shipped: foundation, JSON / CSV renderers, CLI,
+> Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartments +
+> regions + Compute + Load Balancers; 15 stubs), Kubernetes provider
+> (universal via dynamic-client + discovery), and the web UI (`auditor serve`
+> — embedded SPA, SSE-streamed audits, CSV/JSON export, optional basic/token
+> auth). Docker (Phase 6) is next. See [`init-plan.md`](./init-plan.md) for
+> the full phased plan and [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
 
 ## Install
 
@@ -58,10 +58,40 @@ export CLOUDFLARE_API_TOKEN=cf-token-with-zone-read-and-dns-read
 ./bin/auditor audit --provider none -o csv      # → header row only
 
 ./bin/auditor version
-./bin/auditor providers                         # → cloudflare\noci
+./bin/auditor providers                         # → cloudflare\nkubernetes\noci
 ./bin/auditor --help                            # full CLI surface
 ./bin/auditor audit --help                      # all audit flags
 ```
+
+## Web UI
+
+`auditor serve` runs an embedded single-page app + JSON/SSE API. The
+operator's credentials come from the environment at startup (same env
+vars / config files as the CLI); the browser never receives them. The
+frontend can pick which registered providers to run but cannot supply
+new credentials.
+
+```bash
+./bin/auditor serve                                   # → http://localhost:8080, auth=none
+./bin/auditor serve --addr 127.0.0.1:9090 --auth basic
+#   With AUDITOR_BASIC_USER / AUDITOR_BASIC_PASS env vars
+./bin/auditor serve --auth token
+#   With AUDITOR_API_TOKEN env; client sends `Authorization: Bearer <token>`
+```
+
+Endpoints:
+
+| Path                                  | Purpose                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GET /`                               | Embedded SPA — provider checkboxes, "Run audit" button, streamed table, filter / sort / facets   |
+| `GET /healthz`                        | Liveness — always 200, always open (load-balancer probes don't need auth)                        |
+| `GET /api/v1/providers`               | `{providers: [...], auth_mode: "..."}`                                                           |
+| `GET /api/v1/audit?providers=a,b`     | SSE stream: `meta` → `asset`* → `done`. Optional `init_error` / `error` events interleaved       |
+| `GET /api/v1/audit/export?format=csv` | Synchronous download of CSV / JSON / NDJSON — same bytes the CLI emits                           |
+
+Production deployments should sit behind a real reverse proxy (TLS
+termination, rate-limiting, IP allowlist). Built-in `basic` / `token`
+are a backstop for unmanaged setups, not a substitute.
 
 Minimum permissions for what's implemented today:
 
@@ -156,7 +186,7 @@ A full extending guide ships in Phase 9.
 | 2 — Cloudflare provider     | partial  | Zones + DNS records implemented; R2 / KV / Workers / D1 / Pages / Access / Tunnels / Load Balancers / Rulesets / Page Rules / Certificates stubbed |
 | 3 — OCI provider            | partial  | Compartment recursion + region resolution + Compute + Load Balancers implemented; Block / Boot volumes, VCNs, Subnets, Object Storage, Autonomous DBs, DB Systems, Functions, Container Instances, OKE, Vaults, Policies, Users, Groups, Dynamic Groups stubbed |
 | 4 — Kubernetes provider     | shipped  | Dynamic-client + discovery — every built-in resource type and every CRD with no per-resource code. `--kube-context`, `--kube-namespace`, `--kube-exclude-namespaces` honored; per-GVR Forbidden tolerated; aggregated-API discovery failures degrade to warnings |
-| 5 — Web UI                  | planned  | SSE stream, embedded HTML + Alpine, no build step |
+| 5 — Web UI                  | shipped  | Embedded SPA + JSON/SSE API. `auditor serve --addr ... --auth none\|basic\|token`. Streamed asset table, filter / sort / type+provider facets, CSV/JSON export, graceful shutdown. Plain JS rather than the planned Alpine.js — keeps the binary fully self-contained |
 | 6 — Docker                  | planned  | Distroless multi-stage, < 30 MB, non-root |
 | 7 — Helm chart              | planned  | CronJob and Deployment modes, BYO secrets |
 | 8 — GitHub Actions          | planned  | CI, goreleaser, multi-arch GHCR image, reusable composite action |
