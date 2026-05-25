@@ -33,8 +33,12 @@ func newAuditCmd(s *cliState) *cobra.Command {
 			outFile := v.GetString("output-file")
 			stream := v.GetBool("stream")
 			timeout := v.GetDuration("timeout")
-			maxConcurrency := v.GetInt("max-concurrency")
-			includeRaw := v.GetBool("include-raw")
+			opts := providerOptions{
+				maxConcurrency: v.GetInt("max-concurrency"),
+				includeRaw:     v.GetBool("include-raw"),
+				ociProfile:     v.GetString("oci-profile"),
+				ociRegions:     v.GetStringSlice("oci-regions"),
+			}
 
 			renderer, err := buildRenderer(format, stream)
 			if err != nil {
@@ -51,7 +55,7 @@ func newAuditCmd(s *cliState) *cobra.Command {
 			defer cancel()
 
 			selected := selectProviders(providers)
-			applyProviderOptions(selected, maxConcurrency, includeRaw)
+			applyProviderOptions(selected, opts)
 			assets, errs := runProviders(ctx, selected)
 
 			// Drain provider errors in the background so the renderer
@@ -128,16 +132,32 @@ func openOutput(path string) (io.Writer, func(), error) {
 	return f, func() { _ = f.Close() }, nil
 }
 
-// applyProviderOptions pushes --max-concurrency and --include-raw into any
-// provider that opted into the corresponding Configurable interface. Providers
-// that didn't are silently skipped — these are knobs, not requirements.
-func applyProviderOptions(providers []core.Provider, maxConcurrency int, includeRaw bool) {
+// providerOptions bundles every CLI-derived knob the audit command pushes
+// down to providers. Adding a new flag here is the right place to wire it.
+type providerOptions struct {
+	maxConcurrency int
+	includeRaw     bool
+	ociProfile     string
+	ociRegions     []string
+}
+
+// applyProviderOptions type-asserts each provider against the optional
+// Configurable interfaces in core and applies the corresponding flag value.
+// Providers that didn't opt into a given interface are silently skipped —
+// these are knobs, not requirements.
+func applyProviderOptions(providers []core.Provider, opts providerOptions) {
 	for _, p := range providers {
 		if c, ok := p.(core.ConcurrencyConfigurable); ok {
-			c.SetMaxConcurrency(maxConcurrency)
+			c.SetMaxConcurrency(opts.maxConcurrency)
 		}
 		if c, ok := p.(core.IncludeRawConfigurable); ok {
-			c.SetIncludeRaw(includeRaw)
+			c.SetIncludeRaw(opts.includeRaw)
+		}
+		if c, ok := p.(core.ProfileConfigurable); ok {
+			c.SetProfile(opts.ociProfile)
+		}
+		if c, ok := p.(core.RegionsConfigurable); ok {
+			c.SetRegions(opts.ociRegions)
 		}
 	}
 }

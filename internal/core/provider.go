@@ -31,3 +31,17 @@ type ConcurrencyConfigurable interface {
 type IncludeRawConfigurable interface {
 	SetIncludeRaw(b bool)
 }
+
+// ProfileConfigurable receives the value of --oci-profile (or any other
+// provider's "use this named credential profile" flag) before Collect.
+// Providers that don't have a profile concept simply omit the method.
+type ProfileConfigurable interface {
+	SetProfile(p string)
+}
+
+// RegionsConfigurable receives the value of --oci-regions before Collect.
+// The literal "all" is a sentinel meaning "every subscribed region"; the
+// provider is responsible for the expansion.
+type RegionsConfigurable interface {
+	SetRegions(regions []string)
+}

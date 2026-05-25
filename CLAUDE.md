@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-**Phases 1–2 (partial) are shipped.** The foundation, JSON/CSV renderers, full CLI, and the Cloudflare provider (zones + DNS implemented; 11 other resources stubbed in `internal/providers/cloudflare/stubs.go`) are in place. OCI (Phase 3), Kubernetes (Phase 4), and the web UI (Phase 5) are not started.
+**Phases 1–3 (partial) are shipped.** The foundation, JSON/CSV renderers, full CLI, the Cloudflare provider (zones + DNS implemented; 11 stubs), and the OCI provider (compartment recursion + region resolution + Compute instances + Load Balancers implemented; 15 stubs) are in place. Kubernetes (Phase 4) and the web UI (Phase 5) are not started.
 
 **Before doing anything substantive, read `init-plan.md` end-to-end.** It is the single source of truth for the layout, abstractions, and phase ordering. Do not invent architecture that contradicts it.
 
@@ -24,16 +24,18 @@ The plan is Go-first (see §0 for the rationale; Python is an explicit fallback 
 
 Providers register themselves into a `registry` map (via package `init()`) so the CLI can enumerate and select them by name (`--provider oci,cloudflare`). New providers are wired into the binary by adding a blank import to `cmd/auditor/main.go` — that's the only place new providers need to be touched outside their own package.
 
-Two **optional** interfaces on the provider side let the CLI push knob values without changing the base contract:
+**Optional Configurable interfaces** on the provider side let the CLI push knob values without changing the base contract. Each is type-asserted in `internal/cli/audit.go::applyProviderOptions` and skipped silently when not implemented:
 
-- `core.ConcurrencyConfigurable` — `SetMaxConcurrency(int)`; receives `--max-concurrency` before `Collect`.
+- `core.ConcurrencyConfigurable` — `SetMaxConcurrency(int)`; receives `--max-concurrency`.
 - `core.IncludeRawConfigurable` — `SetIncludeRaw(bool)`; receives `--include-raw`.
+- `core.ProfileConfigurable` — `SetProfile(string)`; receives `--oci-profile`.
+- `core.RegionsConfigurable` — `SetRegions([]string)`; receives `--oci-regions`.
 
-Providers that don't care simply omit the methods. `internal/cli/audit.go::applyProviderOptions` type-asserts both and is a no-op when the assertion fails.
+When adding a new CLI flag that needs to reach providers, extend `providerOptions` and `applyProviderOptions`, declare a new Configurable interface in `internal/core/provider.go`, and implement it on the provider(s) that care.
 
 ### Provider-specific gotchas baked into the plan
 
-- **OCI**: must recurse compartments from the tenancy root — the most common omission. Auth chain is instance principal → resource principal → config file → env, with `--oci-profile` to override. One goroutine per region from `--oci-regions`.
+- **OCI**: must recurse compartments from the tenancy root — the most common omission, handled in `internal/providers/oci/compartments.go` via the SDK's `CompartmentIdInSubtree=true` flag. Auth chain (implemented in `auth.go`): instance principal (gated by a 250 ms IMDS probe so laptops don't pay the cost) → resource principal (gated by `OCI_RESOURCE_PRINCIPAL_VERSION` env) → config file (~/.oci/config, profile from `--oci-profile`) → env vars (`OCI_*` prefix). Resource fan-out is per (region × compartment × resource type); tenancy-global resources (Policies / Users / Groups / DynamicGroups) run once outside the loop.
 - **Kubernetes**: use the **dynamic client + discovery** (`ServerPreferredResources` → `dynamicClient.Resource(gvr).List`), not typed clients. This is what makes CRDs work without code changes. Skip subresources; warn-don't-fail on resources the SA can't list.
 - **Cloudflare**: token-only auth (`CLOUDFLARE_API_TOKEN`), no legacy email+key path. Fan out resource enumerations under an `errgroup` capped by `--max-concurrency` (default 5).
 

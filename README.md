@@ -4,13 +4,12 @@ Single-binary CLI (and, eventually, web UI) that inventories cloud assets
 across OCI, Cloudflare, and Kubernetes into one canonical schema, with
 JSON or CSV output.
 
-> **Status: Phase 2 — Cloudflare provider in flight.** Foundation, renderers,
-> CLI, and Cloudflare zones + DNS records are shipped. Eleven other Cloudflare
-> resource types (R2, KV, Workers, Pages, Access, Tunnels, Load Balancers,
-> Rulesets, Page Rules, D1, Certificates) are stubbed in
-> `internal/providers/cloudflare/stubs.go` for incremental fill-in.
-> OCI (Phase 3) and Kubernetes (Phase 4) are not started. See
-> [`init-plan.md`](./init-plan.md) for the full phased plan and
+> **Status: Phases 1–3 partial.** Shipped: foundation, JSON / CSV renderers,
+> CLI, Cloudflare provider (zones + DNS), OCI provider (compartment recursion +
+> region resolution + Compute instances + Load Balancers). 11 Cloudflare and
+> 15 OCI resource types are stubbed for incremental fill-in. Kubernetes
+> (Phase 4) and the web UI (Phase 5) are not started.
+> See [`init-plan.md`](./init-plan.md) for the full phased plan and
 > [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
 
 ## Install
@@ -30,27 +29,35 @@ Phase 8.
 ## Quick start
 
 ```bash
-# Phase 2: real audit against Cloudflare. Lists zones + DNS records today;
-# the other 11 resource types are stubs that emit nothing yet.
+# Cloudflare (Phase 2): zones + DNS today; other 11 types are stubs.
 export CLOUDFLARE_API_TOKEN=cf-token-with-zone-read-and-dns-read
-./bin/auditor audit --provider cloudflare -o json
-./bin/auditor audit --provider cloudflare -o csv > assets.csv
-./bin/auditor audit --provider cloudflare --include-raw -o json   # keeps the full SDK payload in each Asset.Raw
+./bin/auditor audit --provider cloudflare -o csv > cf.csv
+
+# OCI (Phase 3): compartment recursion + Compute instances + Load Balancers
+# today; 15 other resource types stubbed.
+#   Auth chain (auto-detected): instance principal → resource principal
+#   → ~/.oci/config → OCI_* env vars
+./bin/auditor audit --provider oci -o json                       # home region only
+./bin/auditor audit --provider oci --oci-regions all -o csv      # every subscribed region
+./bin/auditor audit --provider oci --oci-profile PROD            # named profile
+./bin/auditor audit --include-raw -o json                        # both providers, with full SDK payloads
 
 # No-provider path (useful for smoke tests):
 ./bin/auditor audit --provider none -o json     # → []
 ./bin/auditor audit --provider none -o csv      # → header row only
 
 ./bin/auditor version
-./bin/auditor providers                         # → cloudflare
+./bin/auditor providers                         # → cloudflare\noci
 ./bin/auditor --help                            # full CLI surface
 ./bin/auditor audit --help                      # all audit flags
 ```
 
-The minimum Cloudflare API-token scopes for the current implementation
-are **Zone:Read** and **Zone.DNS:Read** at the account level. As more
-resource types come online they'll need additional scopes — the full
-permission set will land in `docs/providers.md` (Phase 9).
+Minimum permissions for what's implemented today:
+
+- **Cloudflare**: API token with **Zone:Read** + **Zone.DNS:Read** at the account level.
+- **OCI**: a policy granting `inspect compartments`, `read all-resources` (or at least `read instances` + `read load-balancers`) over the tenancy or compartments you want scanned.
+
+The full per-resource permission matrix lands in `docs/providers.md` (Phase 9).
 
 The complete flag surface (including provider-scoped flags like
 `--oci-regions`, `--kube-context`, `--max-concurrency`, `--include-raw`)
@@ -135,7 +142,7 @@ A full extending guide ships in Phase 9.
 | ----- | -------- | ----- |
 | 1 — Foundation              | shipped  | Core types, JSON / CSV renderers, CLI skeleton, version, justfile |
 | 2 — Cloudflare provider     | partial  | Zones + DNS records implemented; R2 / KV / Workers / D1 / Pages / Access / Tunnels / Load Balancers / Rulesets / Page Rules / Certificates stubbed |
-| 3 — OCI provider            | planned  | Compartment-recursive, multi-region, instance + resource principal auth |
+| 3 — OCI provider            | partial  | Compartment recursion + region resolution + Compute + Load Balancers implemented; Block / Boot volumes, VCNs, Subnets, Object Storage, Autonomous DBs, DB Systems, Functions, Container Instances, OKE, Vaults, Policies, Users, Groups, Dynamic Groups stubbed |
 | 4 — Kubernetes provider     | planned  | Dynamic-client discovery so CRDs come along for free |
 | 5 — Web UI                  | planned  | SSE stream, embedded HTML + Alpine, no build step |
 | 6 — Docker                  | planned  | Distroless multi-stage, < 30 MB, non-root |
