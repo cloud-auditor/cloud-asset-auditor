@@ -4,11 +4,11 @@ Single-binary CLI (and, eventually, web UI) that inventories cloud assets
 across OCI, Cloudflare, and Kubernetes into one canonical schema, with
 JSON or CSV output.
 
-> **Status: Phases 1–3 partial.** Shipped: foundation, JSON / CSV renderers,
-> CLI, Cloudflare provider (zones + DNS), OCI provider (compartment recursion +
-> region resolution + Compute instances + Load Balancers). 11 Cloudflare and
-> 15 OCI resource types are stubbed for incremental fill-in. Kubernetes
-> (Phase 4) and the web UI (Phase 5) are not started.
+> **Status: Phases 1–4 partial.** Shipped: foundation, JSON / CSV renderers,
+> CLI, Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartments +
+> regions + Compute + Load Balancers; 15 stubs), and Kubernetes provider
+> (universal — uses dynamic client + discovery so every built-in type and CRD
+> is inventoried with zero per-resource code). Web UI (Phase 5) is not started.
 > See [`init-plan.md`](./init-plan.md) for the full phased plan and
 > [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
 
@@ -40,7 +40,18 @@ export CLOUDFLARE_API_TOKEN=cf-token-with-zone-read-and-dns-read
 ./bin/auditor audit --provider oci -o json                       # home region only
 ./bin/auditor audit --provider oci --oci-regions all -o csv      # every subscribed region
 ./bin/auditor audit --provider oci --oci-profile PROD            # named profile
-./bin/auditor audit --include-raw -o json                        # both providers, with full SDK payloads
+
+# Kubernetes (Phase 4): every resource type the cluster exposes — built-ins
+# and CRDs — via dynamic discovery. No need to list "what to scan"; the
+# cluster tells us.
+#   Auth: in-cluster when KUBERNETES_SERVICE_HOST is set, else KUBECONFIG /
+#   ~/.kube/config; --kube-context overrides current-context.
+./bin/auditor audit --provider kubernetes -o json
+./bin/auditor audit --provider kubernetes --kube-context kind-dev -o csv
+./bin/auditor audit --provider kubernetes --kube-namespace prod
+./bin/auditor audit --provider kubernetes --kube-exclude-namespaces kube-system,kube-public,kube-node-lease
+
+./bin/auditor audit --include-raw -o json                        # any provider, with full SDK payloads
 
 # No-provider path (useful for smoke tests):
 ./bin/auditor audit --provider none -o json     # → []
@@ -56,6 +67,7 @@ Minimum permissions for what's implemented today:
 
 - **Cloudflare**: API token with **Zone:Read** + **Zone.DNS:Read** at the account level.
 - **OCI**: a policy granting `inspect compartments`, `read all-resources` (or at least `read instances` + `read load-balancers`) over the tenancy or compartments you want scanned.
+- **Kubernetes**: a ClusterRole with `get,list` on `*` (read-only) is the simplest. The provider gracefully degrades on individual resource types the SA can't list (logs them, keeps going), so a narrower role still works — you just won't see what you can't read.
 
 The full per-resource permission matrix lands in `docs/providers.md` (Phase 9).
 
@@ -143,7 +155,7 @@ A full extending guide ships in Phase 9.
 | 1 — Foundation              | shipped  | Core types, JSON / CSV renderers, CLI skeleton, version, justfile |
 | 2 — Cloudflare provider     | partial  | Zones + DNS records implemented; R2 / KV / Workers / D1 / Pages / Access / Tunnels / Load Balancers / Rulesets / Page Rules / Certificates stubbed |
 | 3 — OCI provider            | partial  | Compartment recursion + region resolution + Compute + Load Balancers implemented; Block / Boot volumes, VCNs, Subnets, Object Storage, Autonomous DBs, DB Systems, Functions, Container Instances, OKE, Vaults, Policies, Users, Groups, Dynamic Groups stubbed |
-| 4 — Kubernetes provider     | planned  | Dynamic-client discovery so CRDs come along for free |
+| 4 — Kubernetes provider     | shipped  | Dynamic-client + discovery — every built-in resource type and every CRD with no per-resource code. `--kube-context`, `--kube-namespace`, `--kube-exclude-namespaces` honored; per-GVR Forbidden tolerated; aggregated-API discovery failures degrade to warnings |
 | 5 — Web UI                  | planned  | SSE stream, embedded HTML + Alpine, no build step |
 | 6 — Docker                  | planned  | Distroless multi-stage, < 30 MB, non-root |
 | 7 — Helm chart              | planned  | CronJob and Deployment modes, BYO secrets |

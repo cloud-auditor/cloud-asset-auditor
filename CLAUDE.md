@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-**Phases 1–3 (partial) are shipped.** The foundation, JSON/CSV renderers, full CLI, the Cloudflare provider (zones + DNS implemented; 11 stubs), and the OCI provider (compartment recursion + region resolution + Compute instances + Load Balancers implemented; 15 stubs) are in place. Kubernetes (Phase 4) and the web UI (Phase 5) are not started.
+**Phases 1–4 (partial) are shipped.** Foundation, JSON/CSV renderers, full CLI, Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartment recursion + region resolution + Compute + Load Balancers; 15 stubs), and Kubernetes provider (universal — dynamic client + discovery means every resource type including CRDs is inventoried automatically) are in place. Web UI (Phase 5) is not started.
 
 **Before doing anything substantive, read `init-plan.md` end-to-end.** It is the single source of truth for the layout, abstractions, and phase ordering. Do not invent architecture that contradicts it.
 
@@ -30,13 +30,14 @@ Providers register themselves into a `registry` map (via package `init()`) so th
 - `core.IncludeRawConfigurable` — `SetIncludeRaw(bool)`; receives `--include-raw`.
 - `core.ProfileConfigurable` — `SetProfile(string)`; receives `--oci-profile`.
 - `core.RegionsConfigurable` — `SetRegions([]string)`; receives `--oci-regions`.
+- `core.KubeConfigurable` — bundled `SetKubeContext` / `SetKubeNamespace` / `SetKubeExcludeNamespaces`; receives `--kube-context`, `--kube-namespace`, `--kube-exclude-namespaces` (they're always applied together so one interface suffices).
 
 When adding a new CLI flag that needs to reach providers, extend `providerOptions` and `applyProviderOptions`, declare a new Configurable interface in `internal/core/provider.go`, and implement it on the provider(s) that care.
 
 ### Provider-specific gotchas baked into the plan
 
 - **OCI**: must recurse compartments from the tenancy root — the most common omission, handled in `internal/providers/oci/compartments.go` via the SDK's `CompartmentIdInSubtree=true` flag. Auth chain (implemented in `auth.go`): instance principal (gated by a 250 ms IMDS probe so laptops don't pay the cost) → resource principal (gated by `OCI_RESOURCE_PRINCIPAL_VERSION` env) → config file (~/.oci/config, profile from `--oci-profile`) → env vars (`OCI_*` prefix). Resource fan-out is per (region × compartment × resource type); tenancy-global resources (Policies / Users / Groups / DynamicGroups) run once outside the loop.
-- **Kubernetes**: use the **dynamic client + discovery** (`ServerPreferredResources` → `dynamicClient.Resource(gvr).List`), not typed clients. This is what makes CRDs work without code changes. Skip subresources; warn-don't-fail on resources the SA can't list.
+- **Kubernetes**: uses the **dynamic client + discovery** (`ServerPreferredResources` → `dynamicClient.Resource(gvr).List`), not typed clients. This is what makes CRDs come along for free. Implementation lives in `internal/providers/kubernetes/`. The filtering logic (`filterResources` in `discover.go`) drops subresources (names containing `/`) and anything whose verb list doesn't include `list`. Per-GVR Forbidden / MethodNotSupported errors are swallowed silently — they mean the SA can't see that resource type, which is a permission gap, not a fault. `ServerPreferredResources` partial errors (`*discovery.ErrGroupDiscoveryFailed`) are treated as warnings so a downed aggregated API doesn't kill the whole audit. Auth: in-cluster (when `KUBERNETES_SERVICE_HOST` is set) or kubeconfig (`KUBECONFIG` env, then `~/.kube/config`), with `--kube-context` to override the current-context.
 - **Cloudflare**: token-only auth (`CLOUDFLARE_API_TOKEN`), no legacy email+key path. Fan out resource enumerations under an `errgroup` capped by `--max-concurrency` (default 5).
 
 ### Cross-cutting invariants (§6 of the plan — "cheap now, expensive later")

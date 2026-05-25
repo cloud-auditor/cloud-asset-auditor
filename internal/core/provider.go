@@ -45,3 +45,13 @@ type ProfileConfigurable interface {
 type RegionsConfigurable interface {
 	SetRegions(regions []string)
 }
+
+// KubeConfigurable bundles the three Kubernetes-flag setters. They're always
+// applied together (context picks the cluster; namespace + excludes filter
+// what's listed), so one interface keeps the type-assertion in the CLI tight.
+// Providers that aren't Kubernetes-shaped simply omit the methods.
+type KubeConfigurable interface {
+	SetKubeContext(name string)
+	SetKubeNamespace(ns string)
+	SetKubeExcludeNamespaces(ns []string)
+}

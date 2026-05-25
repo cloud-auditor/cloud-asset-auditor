@@ -34,10 +34,13 @@ func newAuditCmd(s *cliState) *cobra.Command {
 			stream := v.GetBool("stream")
 			timeout := v.GetDuration("timeout")
 			opts := providerOptions{
-				maxConcurrency: v.GetInt("max-concurrency"),
-				includeRaw:     v.GetBool("include-raw"),
-				ociProfile:     v.GetString("oci-profile"),
-				ociRegions:     v.GetStringSlice("oci-regions"),
+				maxConcurrency:        v.GetInt("max-concurrency"),
+				includeRaw:            v.GetBool("include-raw"),
+				ociProfile:            v.GetString("oci-profile"),
+				ociRegions:            v.GetStringSlice("oci-regions"),
+				kubeContext:           v.GetString("kube-context"),
+				kubeNamespace:         v.GetString("kube-namespace"),
+				kubeExcludeNamespaces: v.GetStringSlice("kube-exclude-namespaces"),
 			}
 
 			renderer, err := buildRenderer(format, stream)
@@ -135,10 +138,13 @@ func openOutput(path string) (io.Writer, func(), error) {
 // providerOptions bundles every CLI-derived knob the audit command pushes
 // down to providers. Adding a new flag here is the right place to wire it.
 type providerOptions struct {
-	maxConcurrency int
-	includeRaw     bool
-	ociProfile     string
-	ociRegions     []string
+	maxConcurrency        int
+	includeRaw            bool
+	ociProfile            string
+	ociRegions            []string
+	kubeContext           string
+	kubeNamespace         string
+	kubeExcludeNamespaces []string
 }
 
 // applyProviderOptions type-asserts each provider against the optional
@@ -158,6 +164,11 @@ func applyProviderOptions(providers []core.Provider, opts providerOptions) {
 		}
 		if c, ok := p.(core.RegionsConfigurable); ok {
 			c.SetRegions(opts.ociRegions)
+		}
+		if c, ok := p.(core.KubeConfigurable); ok {
+			c.SetKubeContext(opts.kubeContext)
+			c.SetKubeNamespace(opts.kubeNamespace)
+			c.SetKubeExcludeNamespaces(opts.kubeExcludeNamespaces)
 		}
 	}
 }
