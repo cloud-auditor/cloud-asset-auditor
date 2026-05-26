@@ -345,6 +345,7 @@ A full extending guide ships in Phase 9.
 - **[`docs/configuration.md`](./docs/configuration.md)** — every flag, env var, and config-file key, with precedence rules and exit codes
 - **[`docs/providers.md`](./docs/providers.md)** — per-provider auth setup, minimum permission templates (CF token scopes, OCI policy snippets, K8s ClusterRole YAML), and the per-resource implementation matrix
 - **[`docs/extending.md`](./docs/extending.md)** — step-by-step worked example for adding a new provider
+- **[`CONTRIBUTING.md`](./CONTRIBUTING.md)** — dev setup, conventions, PR flow
 - **[`CLAUDE.md`](./CLAUDE.md)** — architecture notes for contributors (and for future Claude Code sessions)
 - **[`init-plan.md`](./init-plan.md)** — original phased implementation spec
 
