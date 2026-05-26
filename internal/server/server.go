@@ -127,10 +127,23 @@ func (s *Server) routes() {
 	// shouldn't need credentials) and exempted from the auth middleware
 	// by needsAuth's "/api/" check.
 	s.mux.Handle("GET /metrics", metrics.Handler())
+	s.mux.HandleFunc("GET /api/v1/openapi.yaml", s.handleOpenAPI)
 	s.mux.HandleFunc("GET /api/v1/providers", s.handleProviders)
 	s.mux.HandleFunc("GET /api/v1/audit", s.handleAuditSSE)
 	s.mux.HandleFunc("GET /api/v1/audit/export", s.handleAuditExport)
 	s.mux.HandleFunc("GET /api/v1/topology", s.handleTopology)
+}
+
+// handleOpenAPI serves the embedded OpenAPI 3.1 spec verbatim. Spec
+// contains no secrets — kept reachable without auth so client
+// generators (Swagger UI, oapi-codegen, openapi-typescript) can
+// consume the running server's contract without out-of-band downloads.
+// The auth middleware doesn't intervene because /api/v1/openapi.yaml
+// is the only `/api/*` path needsAuth() must explicitly allow through.
+func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/yaml")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	_, _ = w.Write(OpenAPISpec)
 }
 
 func validateAuth(cfg Config) error {

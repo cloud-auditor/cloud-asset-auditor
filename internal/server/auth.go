@@ -28,9 +28,17 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 }
 
 // needsAuth returns true for paths that require credentials when auth is
-// enabled. Keep static assets + healthz open so the page can render.
+// enabled. Keep static assets + healthz + the OpenAPI spec open so the
+// page can render and client generators can fetch the contract without
+// credentials (the spec contains no secrets).
 func needsAuth(path string) bool {
-	return strings.HasPrefix(path, "/api/")
+	if !strings.HasPrefix(path, "/api/") {
+		return false
+	}
+	if path == "/api/v1/openapi.yaml" {
+		return false
+	}
+	return true
 }
 
 func (s *Server) authorized(r *http.Request) bool {

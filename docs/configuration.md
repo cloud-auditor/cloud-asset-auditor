@@ -95,6 +95,36 @@ monitoring:
 
 ---
 
+## API contract
+
+The full machine-readable description of `/api/v1/*` lives at
+[`internal/server/openapi.yaml`](../internal/server/openapi.yaml) and
+is also served by the running server at **`GET /api/v1/openapi.yaml`**
+(reachable without auth — client generators don't carry credentials,
+and the spec contains no secrets).
+
+Use it with any OpenAPI 3.1 tool:
+
+```bash
+# Generate a Go client
+oapi-codegen -package auditorclient http://localhost:8080/api/v1/openapi.yaml > client.go
+
+# Browse interactively
+docker run --rm -p 8087:8080 \
+  -e SWAGGER_JSON_URL=http://host.docker.internal:8080/api/v1/openapi.yaml \
+  swaggerapi/swagger-ui
+
+# Lint after editing
+redocly lint internal/server/openapi.yaml
+```
+
+The Go test suite validates the spec structurally on every PR
+(`internal/server/openapi_test.go`) and asserts every documented path
+has a registered handler — adding a new endpoint without a matching
+spec entry (or vice versa) fails CI.
+
+---
+
 ## `auditor audit`
 
 Collect assets from one or more providers and render them as JSON or CSV.

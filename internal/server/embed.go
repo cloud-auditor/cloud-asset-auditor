@@ -12,3 +12,11 @@ import "embed"
 //
 //go:embed all:web
 var WebFS embed.FS
+
+// OpenAPISpec is the served OpenAPI 3.1 description of /api/v1/*. The
+// handler exposes it verbatim at GET /api/v1/openapi.yaml so client
+// generators (oapi-codegen, openapi-typescript, etc.) can consume the
+// running server's contract without out-of-band downloads.
+//
+//go:embed openapi.yaml
+var OpenAPISpec []byte
