@@ -29,8 +29,14 @@ func Init(configFile string) (*viper.Viper, error) {
 	if configFile != "" {
 		v.SetConfigFile(configFile)
 	} else {
+		// Deliberately do NOT call SetConfigType("yaml"). Viper's
+		// searchInPath has a special case: when configType is set, it
+		// *also* matches the extensionless filename. That made CI pick
+		// up the freshly-built `./auditor` binary, try to parse the ELF
+		// bytes as YAML, and explode. Letting viper auto-detect by
+		// extension is enough — `auditor.yaml`, `auditor.yml`,
+		// `auditor.json`, `auditor.toml`, etc. all work.
 		v.SetConfigName("auditor")
-		v.SetConfigType("yaml")
 		v.AddConfigPath(".")
 		if home, err := os.UserHomeDir(); err == nil {
 			v.AddConfigPath(filepath.Join(home, ".config"))
