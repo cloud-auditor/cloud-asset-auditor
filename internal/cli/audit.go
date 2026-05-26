@@ -129,7 +129,11 @@ func openOutput(path string) (io.Writer, func(), error) {
 	if path == "" || path == "-" {
 		return os.Stdout, func() {}, nil
 	}
-	f, err := os.Create(path)
+	// G304: the path is operator-supplied via --output-file or
+	// AUDITOR_OUTPUT_FILE on a CLI process the operator owns. There's
+	// no untrusted input here — the binary is the trust boundary.
+	// (gosec uses its own #nosec directive; golangci-lint's //nolint is ignored when gosec runs standalone.)
+	f, err := os.Create(path) // #nosec G304
 	if err != nil {
 		return nil, nil, fmt.Errorf("create output file: %w", err)
 	}

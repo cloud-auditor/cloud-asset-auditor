@@ -56,10 +56,18 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      # Pinning to a tag (not @master) so we don't pick up un-vetted action changes.
-      - uses: securego/gosec@v2.21.4
-        with:
-          args: '-exclude-dir=internal/server/web ./...'
+          cache: true
+      # Same story as the lint job: the upstream securego/gosec action
+      # ships a Docker image with a baked-in Go toolchain (currently
+      # 1.23.1) that refuses to load a module declaring `go 1.26.0`.
+      # Installing from source against setup-go's toolchain sidesteps
+      # the version skew entirely.
+      - name: Install gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: gosec
+        run: gosec -exclude-dir=internal/server/web ./...
 
   helm:
     name: helm lint
