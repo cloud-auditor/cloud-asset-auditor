@@ -61,6 +61,18 @@ docker-run *ARGS:
 tidy:
     go mod tidy
 
+# Lint the Helm chart with helm's built-in linter.
+helm-lint:
+    helm lint deploy/helm/cloud-asset-auditor
+    helm lint deploy/helm/cloud-asset-auditor -f deploy/helm/cloud-asset-auditor/examples/values-cronjob.yaml
+    helm lint deploy/helm/cloud-asset-auditor -f deploy/helm/cloud-asset-auditor/examples/values-deployment.yaml
+
+# Render every template in both modes and feed through kubectl --dry-run
+# for schema validation. Catches issues helm lint alone misses.
+helm-template:
+    helm template auditor deploy/helm/cloud-asset-auditor -f deploy/helm/cloud-asset-auditor/examples/values-cronjob.yaml    | kubectl apply --dry-run=client -f -
+    helm template auditor deploy/helm/cloud-asset-auditor -f deploy/helm/cloud-asset-auditor/examples/values-deployment.yaml | kubectl apply --dry-run=client -f -
+
 # Quick exit-criteria check for Phase 1 — useful in CI smoke jobs.
 smoke: build
     test "$(./bin/auditor audit --provider none -o json)" = "[]"

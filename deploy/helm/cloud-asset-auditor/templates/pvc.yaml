@@ -1,0 +1,17 @@
+{{- if and (eq .Values.mode "cronjob") .Values.cronjob.pvc.enabled (not .Values.cronjob.pvc.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cloud-asset-auditor.fullname" . }}
+  labels:
+    {{- include "cloud-asset-auditor.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.cronjob.pvc.accessModes | nindent 4 }}
+  {{- if .Values.cronjob.pvc.storageClassName }}
+  storageClassName: {{ .Values.cronjob.pvc.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.cronjob.pvc.size | quote }}
+{{- end }}

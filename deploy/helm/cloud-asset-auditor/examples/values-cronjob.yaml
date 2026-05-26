@@ -1,0 +1,24 @@
+# Minimum override values to run the auditor as a daily CronJob that
+# audits Cloudflare + the in-cluster Kubernetes API. Apply with:
+#
+#   helm install auditor ./deploy/helm/cloud-asset-auditor \
+#     -f deploy/helm/cloud-asset-auditor/examples/values-cronjob.yaml
+
+mode: cronjob
+
+providers:
+  - kubernetes
+  - cloudflare
+
+credentials:
+  existingSecret: cloud-asset-auditor-credentials
+
+cronjob:
+  schedule: "0 3 * * *"   # 03:00 UTC nightly
+  pvc:
+    enabled: true
+    size: 5Gi
+
+audit:
+  outputFormat: ndjson    # NDJSON is friendlier to log aggregators
+  includeRaw: false

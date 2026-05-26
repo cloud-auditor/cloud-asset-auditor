@@ -1,0 +1,28 @@
+apiVersion: v2
+name: cloud-asset-auditor
+description: |
+  Inventory cloud assets across Cloudflare, OCI, and Kubernetes into a single
+  canonical schema. Ships in two modes: a long-running web UI (Deployment) or
+  a periodic batch audit (CronJob).
+type: application
+# Chart version (chart packaging changes). Bump on every chart change.
+version: 0.1.0
+# App version mirrors the auditor binary it deploys. Keep in lock-step with
+# the published container image tag (see values.image.tag).
+appVersion: "0.1.0"
+keywords:
+  - inventory
+  - audit
+  - cloudflare
+  - oci
+  - oracle-cloud
+  - kubernetes
+  - compliance
+home: https://github.com/cloud-auditor/cloud-asset-auditor
+sources:
+  - https://github.com/cloud-auditor/cloud-asset-auditor
+maintainers:
+  - name: cloud-auditor
+    url: https://github.com/cloud-auditor
+icon: ""
+kubeVersion: ">=1.21.0-0"

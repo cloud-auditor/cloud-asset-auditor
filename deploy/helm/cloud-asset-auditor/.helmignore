@@ -1,0 +1,22 @@
+# Patterns to ignore when building packages.
+# Same list as upstream Helm's default, plus a few project-specific entries.
+.DS_Store
+.git/
+.gitignore
+.bzr/
+.bzrignore
+.hg/
+.hgignore
+.svn/
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+.project
+.idea/
+*.tmproj
+.vscode/
+# Project-specific
+examples/
+README.md

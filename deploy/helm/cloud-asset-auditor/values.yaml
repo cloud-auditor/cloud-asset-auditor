@@ -1,0 +1,167 @@
+# Default values for cloud-asset-auditor.
+# Override only what differs from these defaults.
+
+# -- Deployment shape. One of: "cronjob" (default, periodic audits) or
+# "deployment" (long-running web UI behind a Service / optional Ingress).
+mode: cronjob
+
+image:
+  # -- Image repository. The Phase 8 release workflow publishes to GHCR.
+  repository: ghcr.io/cloud-auditor/cloud-asset-auditor
+  # -- Tag. Defaults to Chart.appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+  # -- imagePullSecrets list, e.g. [{name: ghcr-credentials}].
+  pullSecrets: []
+
+# -- Override the chart name (defaults to "cloud-asset-auditor").
+nameOverride: ""
+# -- Override the fully-qualified app name (defaults to "<release>-<chart>").
+fullnameOverride: ""
+
+credentials:
+  # -- Name of an existing Secret containing provider credentials. Required
+  # for any non-Kubernetes provider. The Secret's key/value pairs are
+  # exposed as env vars via envFrom; see examples/secret.yaml for the
+  # complete set of recognized keys.
+  existingSecret: ""
+
+  # -- Optional: an additional Secret whose `oci_api_key.pem` key is mounted
+  # as a file (the OCI SDK's env-var auth path needs a file path for the
+  # private key, not inline PEM content). If set, the mount path is
+  # injected via the OCI_KEY_PATH env var automatically.
+  ociKeySecret: ""
+
+# -- Provider names to enable. Empty list ([]) means "every registered
+# provider" — at least Cloudflare, OCI, Kubernetes. To run zero providers
+# (smoke-test only), use ["none"].
+providers:
+  - kubernetes
+  # - cloudflare
+  # - oci
+
+# Audit-level flags (mirror `auditor audit --help`).
+audit:
+  maxConcurrency: 5
+  timeout: 10m
+  # -- Include the full upstream SDK payload in Asset.Raw. Large output;
+  # off by default.
+  includeRaw: false
+  # -- Output format. CronJob mode honors this; deployment mode lets the
+  # browser pick at request time.
+  outputFormat: json
+  # -- Verbatim extra CLI args appended to `auditor audit ...`.
+  extraArgs: []
+
+# ------------------------------------------------------------------------
+# CronJob mode (mode == "cronjob")
+# ------------------------------------------------------------------------
+cronjob:
+  # -- Cron schedule (UTC). Default: every 6 hours.
+  schedule: "0 */6 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  # -- Forbid prevents overlapping audits if a run goes long.
+  concurrencyPolicy: Forbid
+  # Optional PVC for persisted output. When disabled (default), output goes
+  # to stdout and is picked up by the cluster's log collector.
+  pvc:
+    enabled: false
+    # -- Use an existing PVC instead of creating one. Leave empty to create.
+    existingClaim: ""
+    storageClassName: ""
+    accessModes: [ReadWriteOnce]
+    size: 1Gi
+    mountPath: /data
+  resources:
+    limits:
+      cpu: "1000m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+
+# ------------------------------------------------------------------------
+# Deployment mode (mode == "deployment")
+# ------------------------------------------------------------------------
+deployment:
+  replicas: 1
+  serve:
+    addr: ":8080"
+    # -- One of: none | basic | token. basic + token require the matching
+    # keys (AUDITOR_BASIC_USER / AUDITOR_BASIC_PASS or AUDITOR_API_TOKEN)
+    # to be present in `credentials.existingSecret`.
+    auth: none
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: auditor.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  # -- HPA / PDB — keep simple. Add later if needed.
+
+# ------------------------------------------------------------------------
+# RBAC + ServiceAccount
+# ------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  # -- Service account name. Defaults to the fullname.
+  name: ""
+  annotations: {}
+rbac:
+  # -- Create a ClusterRole granting [get, list] on apiGroups+resources
+  # [*] (read-only everywhere). The Kubernetes provider needs this to
+  # inventory built-in resources and CRDs alike. Disable if you'll bind
+  # the service account to a pre-existing role.
+  create: true
+
+# ------------------------------------------------------------------------
+# Security
+# ------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# ------------------------------------------------------------------------
+# Scheduling
+# ------------------------------------------------------------------------
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -- Extra annotations on the Pod template (both Deployment and CronJob).
+podAnnotations: {}
+# -- Extra labels on the Pod template.
+podLabels: {}
+
+# -- Extra environment variables. Useful for non-secret tweaks.
+extraEnv: []
+# -- Extra volumes attached to the Pod template.
+extraVolumes: []
+# -- Extra volume mounts on the auditor container.
+extraVolumeMounts: []

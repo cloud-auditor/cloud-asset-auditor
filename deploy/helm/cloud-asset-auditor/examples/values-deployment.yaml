@@ -1,0 +1,39 @@
+# Minimum override values to run the auditor as a long-running web UI
+# behind an Ingress with token-based API auth. Apply with:
+#
+#   helm install auditor ./deploy/helm/cloud-asset-auditor \
+#     -f deploy/helm/cloud-asset-auditor/examples/values-deployment.yaml
+
+mode: deployment
+
+providers:
+  - kubernetes
+  - cloudflare
+  - oci
+
+credentials:
+  existingSecret: cloud-asset-auditor-credentials
+  ociKeySecret:   cloud-asset-auditor-oci-key
+
+deployment:
+  replicas: 2
+  serve:
+    auth: token   # client sends `Authorization: Bearer $AUDITOR_API_TOKEN`
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: auditor.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: auditor-tls
+        hosts:
+          - auditor.example.com
+
+audit:
+  includeRaw: false
+  maxConcurrency: 10

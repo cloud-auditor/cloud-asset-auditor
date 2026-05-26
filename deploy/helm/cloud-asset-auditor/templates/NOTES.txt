@@ -1,0 +1,49 @@
+cloud-asset-auditor {{ .Chart.AppVersion }} installed.
+
+{{- if eq .Values.mode "cronjob" }}
+
+Mode:        cronjob
+Schedule:    {{ .Values.cronjob.schedule }} (UTC)
+Providers:   {{ join ", " .Values.providers }}
+{{- if .Values.cronjob.pvc.enabled }}
+Output:      {{ .Values.cronjob.pvc.mountPath }}/assets-<pod-name>.{{ .Values.audit.outputFormat }} (PersistentVolumeClaim)
+{{- else }}
+Output:      stdout (collected by your cluster log pipeline)
+{{- end }}
+
+Trigger an audit on demand:
+  kubectl -n {{ .Release.Namespace }} create job --from=cronjob/{{ include "cloud-asset-auditor.fullname" . }} run-now-$(date +%s)
+
+Tail the last completed run:
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }} --tail=200 -f
+
+{{- else if eq .Values.mode "deployment" }}
+
+Mode:        deployment (long-running web UI)
+Auth mode:   {{ .Values.deployment.serve.auth }}
+{{- if .Values.deployment.ingress.enabled }}
+
+Ingress is enabled. The UI is reachable at:
+{{- range .Values.deployment.ingress.hosts }}
+  http{{ if $.Values.deployment.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+
+Ingress is disabled. Port-forward to reach the UI locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cloud-asset-auditor.fullname" . }} 8080:{{ .Values.deployment.service.port }}
+  open http://localhost:8080
+{{- end }}
+
+Liveness check:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "cloud-asset-auditor.fullname" . }} -- /auditor version
+{{- end }}
+
+{{- if not .Values.credentials.existingSecret }}
+
+WARNING: credentials.existingSecret is not set. Only the Kubernetes
+in-cluster provider will work. To audit Cloudflare or OCI, create a
+Secret per examples/secret.yaml and reference it:
+
+  helm upgrade {{ .Release.Name }} . --reuse-values \
+    --set credentials.existingSecret=cloud-asset-auditor-credentials
+{{- end }}

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-**Phases 1–6 are shipped.** Foundation, JSON/CSV renderers, full CLI, Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartment recursion + region resolution + Compute + Load Balancers; 15 stubs), Kubernetes provider (universal via dynamic client + discovery), web UI (`auditor serve` — embedded SPA, SSE-streamed audits, CSV/JSON export, optional basic/token auth), and the Docker image (multi-stage build → distroless static, non-root, single static binary). Helm chart (Phase 7) is next.
+**Phases 1–7 are shipped.** Foundation, JSON/CSV renderers, full CLI, Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartment recursion + region resolution + Compute + Load Balancers; 15 stubs), Kubernetes provider (universal via dynamic client + discovery), web UI (`auditor serve`), Docker image (multi-stage → distroless static, non-root), and the Helm chart (`deploy/helm/cloud-asset-auditor/` — supports CronJob and Deployment modes, BYO credentials Secret, read-only ClusterRole). GitHub Actions (Phase 8) is next.
 
 **Before doing anything substantive, read `init-plan.md` end-to-end.** It is the single source of truth for the layout, abstractions, and phase ordering. Do not invent architecture that contradicts it.
 

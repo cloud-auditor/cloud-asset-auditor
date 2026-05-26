@@ -1,0 +1,37 @@
+{{- if .Values.rbac.create -}}
+# Read-only-everywhere ClusterRole. The Kubernetes provider uses dynamic
+# discovery (ServerPreferredResources) so it can't enumerate a smaller
+# verb/resource matrix in advance — it needs `list` against every GVR the
+# cluster exposes, including CRDs that arrive after install. Forbidden
+# responses on individual GVRs are tolerated by the provider (warning,
+# not failure), so this role can be tightened safely if a narrower scope
+# is acceptable.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cloud-asset-auditor.fullname" . }}
+  labels:
+    {{- include "cloud-asset-auditor.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list"]
+  # Non-resource URLs (/healthz, /version) — useful for Validate calls.
+  - nonResourceURLs: ["/healthz", "/version", "/api", "/apis", "/apis/*"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cloud-asset-auditor.fullname" . }}
+  labels:
+    {{- include "cloud-asset-auditor.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cloud-asset-auditor.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cloud-asset-auditor.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

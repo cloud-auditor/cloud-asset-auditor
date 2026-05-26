@@ -1,0 +1,101 @@
+{{- if eq .Values.mode "cronjob" -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "cloud-asset-auditor.fullname" . }}
+  labels:
+    {{- include "cloud-asset-auditor.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit }}
+  concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "cloud-asset-auditor.selectorLabels" . | nindent 12 }}
+            {{- with .Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          serviceAccountName: {{ include "cloud-asset-auditor.serviceAccountName" . }}
+          restartPolicy: OnFailure
+          {{- with .Values.image.pullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: auditor
+              image: {{ include "cloud-asset-auditor.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              args:
+                {{- include "cloud-asset-auditor.auditArgs" . | nindent 16 }}
+              env:
+                - name: POD_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+                {{- if .Values.credentials.ociKeySecret }}
+                - name: OCI_KEY_PATH
+                  value: /etc/oci/oci_api_key.pem
+                {{- end }}
+                {{- with .Values.extraEnv }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              envFrom:
+                {{- include "cloud-asset-auditor.envFrom" . | nindent 16 }}
+              resources:
+                {{- toYaml .Values.cronjob.resources | nindent 16 }}
+              volumeMounts:
+                {{- if .Values.cronjob.pvc.enabled }}
+                - name: output
+                  mountPath: {{ .Values.cronjob.pvc.mountPath }}
+                {{- end }}
+                {{- if .Values.credentials.ociKeySecret }}
+                - name: oci-key
+                  mountPath: /etc/oci
+                  readOnly: true
+                {{- end }}
+                {{- with .Values.extraVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+          volumes:
+            {{- if .Values.cronjob.pvc.enabled }}
+            - name: output
+              persistentVolumeClaim:
+                claimName: {{ default (include "cloud-asset-auditor.fullname" .) .Values.cronjob.pvc.existingClaim }}
+            {{- end }}
+            {{- if .Values.credentials.ociKeySecret }}
+            - name: oci-key
+              secret:
+                secretName: {{ .Values.credentials.ociKeySecret }}
+                items:
+                  - key: oci_api_key.pem
+                    path: oci_api_key.pem
+            {{- end }}
+            {{- with .Values.extraVolumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}
