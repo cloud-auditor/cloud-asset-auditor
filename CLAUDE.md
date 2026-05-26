@@ -4,7 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-**Phases 1–8 are shipped.** Foundation, JSON/CSV renderers, full CLI, Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartment recursion + region resolution + Compute + Load Balancers; 15 stubs), Kubernetes provider (universal via dynamic client + discovery), web UI (`auditor serve`), Docker image (multi-stage → distroless static, non-root), Helm chart (CronJob + Deployment modes), and GitHub Actions (`ci.yml` + `release.yml` + `docker.yml` + reusable `audit` composite action, with goreleaser + cosign-keyless + Trivy SARIF). Docs (Phase 9) is next.
+**Phases 1–9 are shipped.** Every phase from init-plan.md §3 except the network-topology visualization (Phase 10, added later in the same plan) is done. The only outstanding work is the stubbed resource types in each provider (11 Cloudflare, 15 OCI — Kubernetes is universal so it has no stubs) and Phase 10 itself.
+
+Per-phase quick map (file → architectural concern):
+
+- **Phase 1** — `internal/core/`, `internal/output/`, `internal/cli/`, `internal/config/`, `cmd/auditor/main.go`, `justfile`
+- **Phase 2** — `internal/providers/cloudflare/`
+- **Phase 3** — `internal/providers/oci/`
+- **Phase 4** — `internal/providers/kubernetes/`
+- **Phase 5** — `internal/server/` (Go) + `internal/server/web/` (embedded HTML/CSS/JS)
+- **Phase 6** — `deploy/docker/Dockerfile`, `.dockerignore`
+- **Phase 7** — `deploy/helm/cloud-asset-auditor/` (Chart.yaml + values.yaml + templates + examples + chart README)
+- **Phase 8** — `.github/workflows/{ci,release,docker}.yml`, `.github/actions/audit/action.yml`, `.golangci.yml`, `.goreleaser.yaml`, `.trivyignore`
+- **Phase 9** — `docs/{configuration,providers,extending}.md` (this file too)
 
 **Before doing anything substantive, read `init-plan.md` end-to-end.** It is the single source of truth for the layout, abstractions, and phase ordering. Do not invent architecture that contradicts it.
 

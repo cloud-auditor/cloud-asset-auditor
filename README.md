@@ -17,7 +17,22 @@ JSON or CSV output.
 
 ## Install
 
-Requires **Go 1.23+** and [**just**](https://github.com/casey/just).
+Three options, in increasing order of "I want it working five minutes ago":
+
+**1. Prebuilt release (recommended)** — cross-compiled for linux / macOS / windows × amd64 / arm64, with cosign-signed SHA256 checksums:
+
+```bash
+curl -L https://github.com/cloud-auditor/cloud-asset-auditor/releases/latest/download/auditor_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed s/x86_64/amd64/).tar.gz | tar xz
+./auditor version
+```
+
+**2. `go install`** — needs Go 1.26+:
+
+```bash
+go install github.com/cloud-auditor/cloud-asset-auditor/cmd/auditor@latest
+```
+
+**3. From source** — needs Go 1.26+ and [`just`](https://github.com/casey/just):
 
 ```bash
 git clone https://github.com/cloud-auditor/cloud-asset-auditor.git
@@ -26,8 +41,9 @@ just tidy    # download deps, generate go.sum
 just build   # produces ./bin/auditor
 ```
 
-Tagged releases with prebuilt binaries and a `go install` path land in
-Phase 8.
+The Docker image (`ghcr.io/cloud-auditor/cloud-asset-auditor:latest`)
+and Helm chart are documented under [Container](#container) and
+[Kubernetes (Helm)](#kubernetes-helm) below.
 
 ## Quick start
 
@@ -284,8 +300,16 @@ A full extending guide ships in Phase 9.
 | 6 — Docker                  | shipped  | Multi-stage build → `gcr.io/distroless/static-debian12:nonroot`. Non-root (UID 65532), reproducible-ish (`-trimpath`, ldflags-injected version), accepts `--platform` for multi-arch. ~75 MB rather than the plan's <30 MB target (cloudflare-go/v4 + oci-go-sdk/v65 + k8s client-go are large) |
 | 7 — Helm chart              | shipped  | `deploy/helm/cloud-asset-auditor/` — CronJob (default, optional PVC for persisted output) and Deployment (Service + optional Ingress) modes. BYO credentials Secret (`existingSecret`). Read-only `get,list` ClusterRole (overridable). Example values for both modes |
 | 8 — GitHub Actions          | shipped  | `ci.yml` (test + lint + gosec + helm lint + smoke), `release.yml` (goreleaser cross-build + cosign keyless + SBOM), `docker.yml` (multi-arch GHCR push + cosign image sign + Trivy SARIF), reusable `actions/audit` composite |
-| 9 — Docs                    | planned  | Per-provider IAM minimums, extending guide, generated CLI docs |
+| 9 — Docs                    | shipped  | [`docs/configuration.md`](./docs/configuration.md), [`docs/providers.md`](./docs/providers.md), [`docs/extending.md`](./docs/extending.md). README install paths cover prebuilt release / `go install` / from-source / Docker / Helm |
 | 10 — Network topology       | planned  | Infer edges between assets; trace `DNS → security → LB → gateway → service` as JSON / Graphviz / Cytoscape view |
+
+## Docs
+
+- **[`docs/configuration.md`](./docs/configuration.md)** — every flag, env var, and config-file key, with precedence rules and exit codes
+- **[`docs/providers.md`](./docs/providers.md)** — per-provider auth setup, minimum permission templates (CF token scopes, OCI policy snippets, K8s ClusterRole YAML), and the per-resource implementation matrix
+- **[`docs/extending.md`](./docs/extending.md)** — step-by-step worked example for adding a new provider
+- **[`CLAUDE.md`](./CLAUDE.md)** — architecture notes for contributors (and for future Claude Code sessions)
+- **[`init-plan.md`](./init-plan.md)** — original phased implementation spec
 
 ## License
 
