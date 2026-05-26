@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/metrics"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/output"
 )
 
@@ -48,6 +49,12 @@ func (s *Server) handleAuditSSE(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// auditor_server_sse_clients gauge — accurate for the lifetime of
+	// the request. Lets dashboards spot "lots of half-attached browsers
+	// during long audits" early.
+	metrics.SSEClients.Inc()
+	defer metrics.SSEClients.Dec()
 
 	started := time.Now()
 	_ = sse.emit("meta", map[string]any{"started_at": started.UTC().Format(time.RFC3339)})

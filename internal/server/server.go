@@ -16,6 +16,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/metrics"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/telemetry"
 )
 
@@ -122,6 +123,10 @@ func (s *Server) routes() {
 	s.mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	// /metrics is always open (matches /healthz semantics: scrapers
+	// shouldn't need credentials) and exempted from the auth middleware
+	// by needsAuth's "/api/" check.
+	s.mux.Handle("GET /metrics", metrics.Handler())
 	s.mux.HandleFunc("GET /api/v1/providers", s.handleProviders)
 	s.mux.HandleFunc("GET /api/v1/audit", s.handleAuditSSE)
 	s.mux.HandleFunc("GET /api/v1/audit/export", s.handleAuditExport)

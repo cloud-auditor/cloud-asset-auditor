@@ -8,10 +8,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/metrics"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/telemetry"
 )
 
@@ -54,11 +56,14 @@ func (s *Server) runProviders(ctx context.Context, names []string) (assets <-cha
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			timer := prometheus.NewTimer(metrics.AuditDurationSeconds.WithLabelValues(p.Name()))
+			defer timer.ObserveDuration()
+
 			pCtx, pSpan := telemetry.Tracer().Start(ctx, "provider.collect",
 				trace.WithAttributes(attribute.String("provider.name", p.Name())))
 			defer pSpan.End()
 			pAssets, pErrs := p.Collect(pCtx)
-			forward(pCtx, pAssets, pErrs, a, e)
+			forward(pCtx, p.Name(), pAssets, pErrs, a, e)
 		}()
 	}
 	go func() {
@@ -125,9 +130,12 @@ func (s *Server) applyProviderOptions(p core.Provider) {
 }
 
 // forward copies values from one provider's channels onto the fan-in
-// channels until both source channels close or ctx is cancelled.
+// channels until both source channels close or ctx is cancelled. Each
+// asset / error increments the matching Prometheus counter — same
+// instrumentation pattern as cli/audit.go::forward.
 func forward(
 	ctx context.Context,
+	providerName string,
 	srcAssets <-chan core.Asset, srcErrs <-chan error,
 	dstAssets chan<- core.Asset, dstErrs chan<- error,
 ) {
@@ -140,6 +148,7 @@ func forward(
 				srcAssets = nil
 				continue
 			}
+			metrics.AssetsCollectedTotal.WithLabelValues(providerName, a.Type).Inc()
 			select {
 			case dstAssets <- a:
 			case <-ctx.Done():
@@ -153,6 +162,7 @@ func forward(
 			if er == nil {
 				continue
 			}
+			metrics.AuditErrorsTotal.WithLabelValues(providerName).Inc()
 			select {
 			case dstErrs <- er:
 			case <-ctx.Done():

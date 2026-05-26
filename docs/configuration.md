@@ -63,6 +63,38 @@ applies to tracing output too.
 
 ---
 
+## Metrics (`auditor serve`)
+
+`auditor serve` exposes Prometheus metrics at **`GET /metrics`**. Always
+open (same semantics as `/healthz` — scrapers don't carry credentials).
+
+| Metric                                                            | Type      | Labels             | Meaning                                                              |
+| ----------------------------------------------------------------- | --------- | ------------------ | -------------------------------------------------------------------- |
+| `auditor_assets_collected_total`                                  | counter   | `provider`, `type` | One per Asset emitted by a Collect run                               |
+| `auditor_audit_duration_seconds`                                  | histogram | `provider`         | Per-provider wall-clock for the full Collect + forward               |
+| `auditor_audit_errors_total`                                      | counter   | `provider`         | Per-provider non-nil errors received from the channel                |
+| `auditor_server_sse_clients`                                      | gauge     | —                  | Active `/api/v1/audit` SSE subscribers                               |
+| `process_*`, `go_*`                                               | mixed     | —                  | Standard process + Go runtime collectors                             |
+
+The same `internal/metrics` package is shared between `auditor audit`
+and `auditor serve`, so the counters and histograms also tick during
+CLI audits — they're just not exposed anywhere (the CLI process exits
+before a scraper could see them).
+
+To scrape from a Prometheus Operator setup, enable the chart's
+ServiceMonitor:
+
+```yaml
+# in your values.yaml
+monitoring:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack   # match the Operator's selector
+```
+
+---
+
 ## `auditor audit`
 
 Collect assets from one or more providers and render them as JSON or CSV.

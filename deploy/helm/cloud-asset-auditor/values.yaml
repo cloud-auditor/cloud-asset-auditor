@@ -131,6 +131,27 @@ rbac:
   create: true
 
 # ------------------------------------------------------------------------
+# Observability
+# ------------------------------------------------------------------------
+# Prometheus scraping. The ServiceMonitor CRD is provided by the
+# Prometheus Operator (kube-prometheus-stack); enabling this without the
+# operator installed will not break the chart but won't yield metrics
+# either. See the auditor exposing /metrics regardless of this flag —
+# enable when you also have the Operator's scrapers running.
+monitoring:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    # -- Extra labels on the ServiceMonitor resource (commonly used for
+    # release-label selectors by the Operator, e.g. {release: kube-prometheus-stack}).
+    labels: {}
+    # -- Per-target relabelings applied at scrape time.
+    relabelings: []
+    # -- Per-metric relabelings (drop noisy series, rename labels, etc.).
+    metricRelabelings: []
+
+# ------------------------------------------------------------------------
 # Security
 # ------------------------------------------------------------------------
 podSecurityContext:

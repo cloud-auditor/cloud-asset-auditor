@@ -11,11 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/metrics"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/output"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/telemetry"
 )
@@ -247,11 +249,16 @@ func runProviders(ctx context.Context, providers []core.Provider) (<-chan core.A
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// auditor_audit_duration_seconds{provider=...} — observes
+			// the elapsed time of this provider's Collect + forward.
+			timer := prometheus.NewTimer(metrics.AuditDurationSeconds.WithLabelValues(p.Name()))
+			defer timer.ObserveDuration()
+
 			pCtx, pSpan := telemetry.Tracer().Start(ctx, "provider.collect",
 				trace.WithAttributes(attribute.String("provider.name", p.Name())))
 			defer pSpan.End()
 			pAssets, pErrs := p.Collect(pCtx)
-			forward(pCtx, pAssets, pErrs, assets, errs)
+			forward(pCtx, p.Name(), pAssets, pErrs, assets, errs)
 		}()
 	}
 	go func() {
@@ -264,9 +271,13 @@ func runProviders(ctx context.Context, providers []core.Provider) (<-chan core.A
 }
 
 // forward copies values from a single provider's channels onto the fan-in
-// channels until both source channels close or ctx is cancelled.
+// channels until both source channels close or ctx is cancelled. Each
+// asset / error increments the matching Prometheus counter — instrumenting
+// here (rather than in every per-resource collector) keeps providers SDK-only
+// and routes every emission through exactly one accounting site.
 func forward(
 	ctx context.Context,
+	providerName string,
 	srcAssets <-chan core.Asset, srcErrs <-chan error,
 	dstAssets chan<- core.Asset, dstErrs chan<- error,
 ) {
@@ -279,6 +290,7 @@ func forward(
 				srcAssets = nil
 				continue
 			}
+			metrics.AssetsCollectedTotal.WithLabelValues(providerName, a.Type).Inc()
 			select {
 			case dstAssets <- a:
 			case <-ctx.Done():
@@ -292,6 +304,7 @@ func forward(
 			if e == nil {
 				continue
 			}
+			metrics.AuditErrorsTotal.WithLabelValues(providerName).Inc()
 			select {
 			case dstErrs <- e:
 			case <-ctx.Done():
