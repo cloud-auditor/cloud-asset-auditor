@@ -26,8 +26,10 @@ func New(format string) (Renderer, error) {
 		return &dotRenderer{}, nil
 	case "mermaid":
 		return &mermaidRenderer{}, nil
+	case "excalidraw":
+		return &excalidrawRenderer{}, nil
 	default:
-		return nil, fmt.Errorf("unknown topology format %q (want json|dot|mermaid)", format)
+		return nil, fmt.Errorf("unknown topology format %q (want json|dot|mermaid|excalidraw)", format)
 	}
 }
 

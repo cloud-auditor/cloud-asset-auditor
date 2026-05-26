@@ -200,11 +200,16 @@ auditor topology -o dot | dot -Tsvg > flow.svg
 # Trace a single hostname.
 auditor topology --hostname api.example.com -o mermaid
 
+# Editable hand-drawn diagram — drop the file into excalidraw.com or
+# the Excalidraw desktop app and drag nodes around; arrows stay attached.
+auditor topology -o excalidraw > topology.excalidraw
+
 # Programmatic consumers.
 auditor topology -o json | jq '.edges[] | select(.kind == "lb-backend")'
 
-# Or hit the JSON API.
-curl http://localhost:8080/api/v1/topology?hostname=api.example.com | jq
+# Or hit the API. Same format= query param picks the renderer.
+curl 'http://localhost:8080/api/v1/topology?hostname=api.example.com' | jq
+curl 'http://localhost:8080/api/v1/topology?format=excalidraw' -o topology.excalidraw
 ```
 
 The subcommand forces `--include-raw` on providers internally so the
@@ -333,7 +338,7 @@ A full extending guide ships in Phase 9.
 | 7 — Helm chart              | shipped  | `deploy/helm/cloud-asset-auditor/` — CronJob (default, optional PVC for persisted output) and Deployment (Service + optional Ingress) modes. BYO credentials Secret (`existingSecret`). Read-only `get,list` ClusterRole (overridable). Example values for both modes |
 | 8 — GitHub Actions          | shipped  | `ci.yml` (test + lint + gosec + helm lint + smoke), `release.yml` (goreleaser cross-build + cosign keyless + SBOM), `docker.yml` (multi-arch GHCR push + cosign image sign + Trivy SARIF), reusable `actions/audit` composite |
 | 9 — Docs                    | shipped  | [`docs/configuration.md`](./docs/configuration.md), [`docs/providers.md`](./docs/providers.md), [`docs/extending.md`](./docs/extending.md). README install paths cover prebuilt release / `go install` / from-source / Docker / Helm |
-| 10 — Network topology       | shipped  | `auditor topology` subcommand → JSON / DOT / Mermaid (vanilla; no Cytoscape vendoring — same rationale as Phase 5). Resolvers: `dnsToTarget` (cross-cloud heuristic), `wafBinding` (skeleton), `lbToGateway` (OCI LB → K8s Service by external IP), `gatewayToService` (Ingress / HTTPRoute → backing Service, exact). `/api/v1/topology` endpoint returns `{nodes, edges}` JSON |
+| 10 — Network topology       | shipped  | `auditor topology` subcommand → JSON / DOT / Mermaid / **Excalidraw** (LR-layered layout, color-coded per provider, dashed arrows for heuristic edges, deterministic seeds for diff-friendly output). Resolvers: `dnsToTarget` (cross-cloud heuristic), `wafBinding` (skeleton), `lbToGateway` (OCI LB → K8s Service by external IP), `gatewayToService` (Ingress / HTTPRoute → backing Service, exact). `/api/v1/topology` returns JSON by default or any format via `?format=` |
 
 ## Docs
 

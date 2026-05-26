@@ -292,3 +292,150 @@ func TestNew_UnknownFormatErrors(t *testing.T) {
 		t.Error("expected error for unknown format")
 	}
 }
+
+func TestRenderer_Excalidraw_StructureAndBindings(t *testing.T) {
+	topo := topology.Build(canonicalChain()).DropOrphans()
+	r, err := topology.New("excalidraw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := r.Render(topo, &buf); err != nil {
+		t.Fatal(err)
+	}
+
+	var doc struct {
+		Type     string                   `json:"type"`
+		Version  int                      `json:"version"`
+		Elements []map[string]any         `json:"elements"`
+		AppState map[string]any           `json:"appState"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
+	}
+	if doc.Type != "excalidraw" {
+		t.Errorf("doc.type = %q, want excalidraw", doc.Type)
+	}
+	if doc.Version != 2 {
+		t.Errorf("doc.version = %d, want 2", doc.Version)
+	}
+
+	// Count elements per type. For each node we expect a rectangle + a
+	// text element; for each edge we expect an arrow.
+	counts := map[string]int{}
+	rectIDs := map[string]bool{}
+	for _, el := range doc.Elements {
+		typ, _ := el["type"].(string)
+		counts[typ]++
+		if typ == "rectangle" {
+			id, _ := el["id"].(string)
+			rectIDs[id] = true
+		}
+	}
+	if counts["rectangle"] != len(topo.Nodes) {
+		t.Errorf("rectangles = %d, want %d (one per node)", counts["rectangle"], len(topo.Nodes))
+	}
+	if counts["text"] != len(topo.Nodes) {
+		t.Errorf("text = %d, want %d (one per node)", counts["text"], len(topo.Nodes))
+	}
+	if counts["arrow"] != len(topo.Edges) {
+		t.Errorf("arrows = %d, want %d (one per edge)", counts["arrow"], len(topo.Edges))
+	}
+
+	// Every arrow's start/end binding must point at a rectangle that
+	// actually exists — broken refs would render as orphan lines in
+	// Excalidraw.
+	for _, el := range doc.Elements {
+		if el["type"] != "arrow" {
+			continue
+		}
+		start, _ := el["startBinding"].(map[string]any)
+		end, _ := el["endBinding"].(map[string]any)
+		if start == nil || end == nil {
+			t.Errorf("arrow %v missing bindings", el["id"])
+			continue
+		}
+		if id, _ := start["elementId"].(string); !rectIDs[id] {
+			t.Errorf("arrow startBinding.elementId %q references unknown rectangle", id)
+		}
+		if id, _ := end["elementId"].(string); !rectIDs[id] {
+			t.Errorf("arrow endBinding.elementId %q references unknown rectangle", id)
+		}
+	}
+
+	// Heuristic arrows should be dashed; exact arrows solid.
+	var hasDashed, hasSolid bool
+	for _, el := range doc.Elements {
+		if el["type"] != "arrow" {
+			continue
+		}
+		switch el["strokeStyle"] {
+		case "dashed":
+			hasDashed = true
+		case "solid":
+			hasSolid = true
+		}
+	}
+	if !hasDashed {
+		t.Errorf("no dashed arrows in output — the canonical chain has heuristic edges (DNS→LB/Service)")
+	}
+	if !hasSolid {
+		t.Errorf("no solid arrows in output — the canonical chain has exact edges (Ingress→Service)")
+	}
+}
+
+func TestRenderer_Excalidraw_TextBoundToContainer(t *testing.T) {
+	topo := topology.Build(canonicalChain()).DropOrphans()
+	r, _ := topology.New("excalidraw")
+	var buf bytes.Buffer
+	if err := r.Render(topo, &buf); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Elements []map[string]any `json:"elements"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+
+	rectIDs := map[string]bool{}
+	for _, el := range doc.Elements {
+		if el["type"] == "rectangle" {
+			id, _ := el["id"].(string)
+			rectIDs[id] = true
+		}
+	}
+
+	textsBoundToRect := 0
+	for _, el := range doc.Elements {
+		if el["type"] != "text" {
+			continue
+		}
+		container, _ := el["containerId"].(string)
+		if rectIDs[container] {
+			textsBoundToRect++
+		}
+	}
+	if textsBoundToRect != len(rectIDs) {
+		t.Errorf("expected every text bound to a rectangle (got %d / %d)",
+			textsBoundToRect, len(rectIDs))
+	}
+}
+
+func TestRenderer_Excalidraw_DeterministicSeeds(t *testing.T) {
+	// Same input → byte-identical output, so checking a diff produces
+	// nothing when the topology hasn't changed.
+	topo := topology.Build(canonicalChain()).DropOrphans()
+	r, _ := topology.New("excalidraw")
+
+	var a, b bytes.Buffer
+	if err := r.Render(topo, &a); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Render(topo, &b); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a.Bytes(), b.Bytes()) {
+		t.Errorf("two renders of the same topology differ — IDs/seeds must be stable")
+	}
+}

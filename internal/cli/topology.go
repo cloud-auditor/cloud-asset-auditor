@@ -28,6 +28,7 @@ Examples:
   auditor topology -o dot | dot -Tsvg > flow.svg
   auditor topology --hostname api.example.com -o mermaid
   auditor topology -o json | jq '.edges[] | select(.kind == "lb-backend")'
+  auditor topology -o excalidraw > topology.excalidraw   # drag into excalidraw.com to edit
 `,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := s.v.BindPFlags(cmd.Flags()); err != nil {
@@ -110,7 +111,7 @@ Examples:
 
 	cmd.Flags().StringSlice("provider", nil,
 		`providers to run (default: all registered; use "none" to run zero)`)
-	cmd.Flags().StringP("output", "o", "json", "output format: json|dot|mermaid")
+	cmd.Flags().StringP("output", "o", "json", "output format: json|dot|mermaid|excalidraw")
 	cmd.Flags().String("output-file", "", "write output to this file instead of stdout")
 	cmd.Flags().StringSlice("hostname", nil, "trace only these hostnames (default: all)")
 	cmd.Flags().Bool("include-orphans", false, "include asset nodes that have no edges")
