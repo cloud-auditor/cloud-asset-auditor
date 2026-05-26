@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -189,12 +190,12 @@ func selectProviders(names []string) []core.Provider {
 		}
 		factory, ok := core.Lookup(n)
 		if !ok {
-			fmt.Fprintf(os.Stderr, "warning: provider %q not registered\n", n)
+			slog.Warn("provider not registered", "provider", n)
 			continue
 		}
 		p, err := factory()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: provider %q failed to initialize: %v\n", n, err)
+			slog.Warn("provider failed to initialize", "provider", n, "error", err)
 			continue
 		}
 		out = append(out, p)

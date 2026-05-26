@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/config"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/logging"
 )
 
 // cliState carries cross-cutting state between cobra commands. It's
@@ -21,6 +23,7 @@ import (
 type cliState struct {
 	cfgFile string
 	v       *viper.Viper
+	logger  *slog.Logger
 }
 
 // ErrPartial signals that one or more providers failed but the run
@@ -35,16 +38,38 @@ func newRootCmd() *cobra.Command {
 		Short:         "Inventory cloud assets across providers (OCI, Cloudflare, Kubernetes).",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			v, err := config.Init(state.cfgFile)
 			if err != nil {
 				return err
 			}
 			state.v = v
+
+			// Bind the persistent log flags to viper *before* reading
+			// them so AUDITOR_LOG_LEVEL / AUDITOR_LOG_FORMAT env vars
+			// and config-file keys take effect.
+			if err := v.BindPFlag("log-level", cmd.Root().PersistentFlags().Lookup("log-level")); err != nil {
+				return fmt.Errorf("bind log-level: %w", err)
+			}
+			if err := v.BindPFlag("log-format", cmd.Root().PersistentFlags().Lookup("log-format")); err != nil {
+				return fmt.Errorf("bind log-format: %w", err)
+			}
+
+			logger, err := logging.New(logging.Options{
+				Level:  v.GetString("log-level"),
+				Format: v.GetString("log-format"),
+			})
+			if err != nil {
+				return err
+			}
+			state.logger = logger
+			logging.SetDefault(logger)
 			return nil
 		},
 	}
 	cmd.PersistentFlags().StringVar(&state.cfgFile, "config", "", "path to config file")
+	cmd.PersistentFlags().String("log-level", "info", "log level: debug|info|warn|error")
+	cmd.PersistentFlags().String("log-format", "text", "log format: text|json")
 
 	cmd.AddCommand(newAuditCmd(state))
 	cmd.AddCommand(newServeCmd(state))

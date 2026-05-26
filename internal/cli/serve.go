@@ -9,6 +9,10 @@ import (
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/server"
 )
 
+// nb: the listen-address banner uses slog at INFO via the cliState
+// logger so it flows through the operator's log pipeline (JSON in prod,
+// text on laptops) instead of bypassing it via Fprintf.
+
 func newServeCmd(s *cliState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -45,8 +49,10 @@ providers to run via the API but cannot supply new credentials.`,
 				return err
 			}
 
-			fmt.Fprintf(cmd.ErrOrStderr(),
-				"auditor serve: listening on %s (auth=%s)\n", cfg.Addr, cfg.AuthMode)
+			s.logger.Info("auditor serve listening",
+				"addr", cfg.Addr,
+				"auth", cfg.AuthMode,
+				"max_concurrency", cfg.MaxConcurrency)
 
 			return srv.Run(cmd.Context())
 		},

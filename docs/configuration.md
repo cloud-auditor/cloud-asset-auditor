@@ -18,6 +18,26 @@ see [providers.md](./providers.md) for the per-provider list.
 
 ---
 
+## Logging (applies to every subcommand)
+
+Two persistent flags configure the structured logger that ships with
+the binary. Logs go to **stderr** only — stdout is reserved for renderer
+output (so `auditor audit ... -o json | jq` works regardless of log
+verbosity).
+
+| Flag             | Env / config key       | Default | Notes                                       |
+| ---------------- | ---------------------- | ------- | ------------------------------------------- |
+| `--log-level`    | `AUDITOR_LOG_LEVEL`    | `info`  | `debug` \| `info` \| `warn` \| `error`     |
+| `--log-format`   | `AUDITOR_LOG_FORMAT`   | `text`  | `text` for terminals, `json` for log aggregators |
+
+`json` produces one record per line, parseable by anything that speaks
+the standard `log/slog` JSON shape (`time`, `level`, `msg`, plus
+free-form key/value attributes). Unknown formats fall back to `text`
+rather than crashing the binary — a production typo (`JSON`, `yaml`)
+shouldn't take the process down.
+
+---
+
 ## `auditor audit`
 
 Collect assets from one or more providers and render them as JSON or CSV.

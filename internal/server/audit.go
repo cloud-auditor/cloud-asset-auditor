@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -64,12 +65,16 @@ func (s *Server) selectProviders(names []string) ([]core.Provider, []string) {
 		}
 		factory, ok := core.Lookup(n)
 		if !ok {
-			initErrs = append(initErrs, fmt.Sprintf("provider %q is not registered", n))
+			msg := fmt.Sprintf("provider %q is not registered", n)
+			initErrs = append(initErrs, msg)
+			slog.Warn("provider not registered", "provider", n)
 			continue
 		}
 		p, err := factory()
 		if err != nil {
-			initErrs = append(initErrs, fmt.Sprintf("provider %q failed to initialize: %v", n, err))
+			msg := fmt.Sprintf("provider %q failed to initialize: %v", n, err)
+			initErrs = append(initErrs, msg)
+			slog.Warn("provider failed to initialize", "provider", n, "error", err)
 			continue
 		}
 		s.applyProviderOptions(p)
