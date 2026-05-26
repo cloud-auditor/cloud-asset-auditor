@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-**Phases 1–9 are shipped.** Every phase from init-plan.md §3 except the network-topology visualization (Phase 10, added later in the same plan) is done. The only outstanding work is the stubbed resource types in each provider (11 Cloudflare, 15 OCI — Kubernetes is universal so it has no stubs) and Phase 10 itself.
+**All phases are shipped.** Every phase from init-plan.md §3 plus the user-added Phase 10 (network topology) is done. Outstanding work is the stubbed resource types in each provider (11 Cloudflare, 15 OCI — Kubernetes is universal so has no stubs) and the interactive Cytoscape.js UI tab Phase 10 mentioned (skipped for the same vendor-JS reason Phase 5's Alpine.js was — render with `dot`/`mermaid` instead).
 
 Per-phase quick map (file → architectural concern):
 
@@ -17,6 +17,7 @@ Per-phase quick map (file → architectural concern):
 - **Phase 7** — `deploy/helm/cloud-asset-auditor/` (Chart.yaml + values.yaml + templates + examples + chart README)
 - **Phase 8** — `.github/workflows/{ci,release,docker}.yml`, `.github/actions/audit/action.yml`, `.golangci.yml`, `.goreleaser.yaml`, `.trivyignore`
 - **Phase 9** — `docs/{configuration,providers,extending}.md` (this file too)
+- **Phase 10** — `internal/core/edge.go`, `internal/topology/`, `internal/cli/topology.go`, `internal/server/topology.go`
 
 **Before doing anything substantive, read `init-plan.md` end-to-end.** It is the single source of truth for the layout, abstractions, and phase ordering. Do not invent architecture that contradicts it.
 
@@ -27,6 +28,8 @@ The project uses **`just`** (not `make`) as the task runner. Standard recipes: `
 **SDK choice deviation from the plan:** Phase 2 uses `github.com/cloudflare/cloudflare-go/v4` (the current production generated SDK), not `v2` as init-plan.md §3 specifies — `v2` was an early-access generated SDK that's been superseded. The `v4` API uses `cloudflare.F(value)` to wrap required params and an `AutoPager` iterator pattern (`iter.Next()` / `iter.Current()` / `iter.Err()`).
 
 **Phase 5 frontend deviation:** init-plan.md specifies Alpine.js. The shipped UI is plain vanilla JS instead — keeps the binary self-contained without vendoring third-party JS, smaller payload, simpler review surface. Same feature set: SSE streaming, sort, filter, provider/type facets, CSV/JSON export, sticky header. Lives in `internal/server/web/` (the plan put `web/` at the repo root; embedded assets are conventionally placed inside the package that uses them in Go).
+
+**Phase 10 UI deviation:** the plan called for an interactive Cytoscape.js Topology tab. Same vendor-JS reason as Phase 5 — instead, the topology ships as a CLI subcommand + JSON API endpoint, and renders to Graphviz DOT or Mermaid for the human-facing case (which is where this view actually lives — runbooks and PR descriptions). The JSON endpoint at `/api/v1/topology` returns `{nodes, edges}` so anyone wanting to build a Cytoscape view can do so from outside the binary.
 
 **Phase 6 image size deviation:** init-plan.md §3 Phase 6 calls for `< 30 MB`. Actual size is ~75 MB. The Cloudflare v4 generated SDK, the OCI v65 SDK (70+ service packages), and k8s client-go + apimachinery push the static binary alone to ~73 MB before distroless adds ~2 MB. Hitting <30 MB would require either ripping out provider SDKs (defeating the point) or a build-tag pruning scheme that doesn't exist upstream. Documented in the Dockerfile comments; revisit if a smaller image becomes a hard requirement.
 

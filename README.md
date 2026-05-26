@@ -4,16 +4,15 @@ Single-binary CLI (and, eventually, web UI) that inventories cloud assets
 across OCI, Cloudflare, and Kubernetes into one canonical schema, with
 JSON or CSV output.
 
-> **Status: Phases 1–8.** Shipped: foundation, JSON / CSV renderers, CLI,
-> Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartments +
-> regions + Compute + Load Balancers; 15 stubs), Kubernetes provider
-> (universal via dynamic-client + discovery), the web UI (`auditor serve`),
-> the Docker image (multi-stage → distroless static, non-root), the Helm
-> chart (CronJob + Deployment modes), and GitHub Actions (CI, goreleaser
-> release with cosign keyless, multi-arch GHCR image with Trivy scan, plus
-> a reusable composite `audit` action other repos can `uses:`). Docs (Phase 9)
-> is next. See [`init-plan.md`](./init-plan.md) for the full phased plan
-> and [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
+> **All phases shipped.** Foundation, JSON / CSV renderers, CLI, three
+> providers (Cloudflare zones+DNS / OCI compartments+Compute+LBs /
+> Kubernetes universal), web UI (`auditor serve`), Docker image (distroless
+> static, non-root), Helm chart, GitHub Actions (CI + goreleaser + multi-arch
+> GHCR + Trivy + reusable `audit` action), docs, and the topology graph
+> (`auditor topology` → JSON / DOT / Mermaid plus `/api/v1/topology`).
+> Remaining work is the per-provider stubbed resource types
+> (11 Cloudflare, 15 OCI). See [`init-plan.md`](./init-plan.md) for the
+> full plan and [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
 
 ## Install
 
@@ -186,8 +185,41 @@ GitHub Actions live in `.github/workflows/`:
 | `release.yml` | Push of a `v*` tag               | `goreleaser` cross-builds (linux / darwin / windows × amd64 / arm64) + SHA256 checksums + cosign keyless OIDC signature + SBOM (syft) + GitHub Release |
 | `docker.yml`  | Push to `main` + `v*` tags + PRs | Buildx multi-arch (linux/amd64 + linux/arm64) image push to `ghcr.io/cloud-auditor/cloud-asset-auditor` with cosign signing, then Trivy scan (HIGH/CRITICAL gate; suppress via `.trivyignore`) with SARIF upload to GitHub Security |
 
-The reusable composite action at `.github/actions/audit/action.yml` lets
-other repos run an audit in one step:
+## Topology
+
+`auditor topology` walks the inventory and infers the request-path graph
+between assets: DNS → security → cloud LB → cluster gateway → Service.
+Edges carry a `confidence` field (`exact` for same-cluster lookups,
+`heuristic` for cross-cloud IP/hostname matches) so the rendered graph
+makes its guesses visible.
+
+```bash
+# Render to SVG via Graphviz (the typical runbook flow).
+auditor topology -o dot | dot -Tsvg > flow.svg
+
+# Trace a single hostname.
+auditor topology --hostname api.example.com -o mermaid
+
+# Programmatic consumers.
+auditor topology -o json | jq '.edges[] | select(.kind == "lb-backend")'
+
+# Or hit the JSON API.
+curl http://localhost:8080/api/v1/topology?hostname=api.example.com | jq
+```
+
+The subcommand forces `--include-raw` on providers internally so the
+Kubernetes resolvers can parse Ingress / HTTPRoute / Service payloads.
+The rendered output omits `raw` to stay readable.
+
+The Cytoscape.js interactive view init-plan.md §3 Phase 10 envisioned
+is deliberately not vendored — same rationale as the vanilla-JS
+frontend choice in Phase 5. The JSON endpoint exists precisely so an
+out-of-tree dashboard can build whatever interactive view it wants.
+
+### Reusable composite action
+
+The action at `.github/actions/audit/action.yml` lets other repos run
+an audit in one step:
 
 ```yaml
 - uses: cloud-auditor/cloud-asset-auditor/.github/actions/audit@v1
@@ -301,7 +333,7 @@ A full extending guide ships in Phase 9.
 | 7 — Helm chart              | shipped  | `deploy/helm/cloud-asset-auditor/` — CronJob (default, optional PVC for persisted output) and Deployment (Service + optional Ingress) modes. BYO credentials Secret (`existingSecret`). Read-only `get,list` ClusterRole (overridable). Example values for both modes |
 | 8 — GitHub Actions          | shipped  | `ci.yml` (test + lint + gosec + helm lint + smoke), `release.yml` (goreleaser cross-build + cosign keyless + SBOM), `docker.yml` (multi-arch GHCR push + cosign image sign + Trivy SARIF), reusable `actions/audit` composite |
 | 9 — Docs                    | shipped  | [`docs/configuration.md`](./docs/configuration.md), [`docs/providers.md`](./docs/providers.md), [`docs/extending.md`](./docs/extending.md). README install paths cover prebuilt release / `go install` / from-source / Docker / Helm |
-| 10 — Network topology       | planned  | Infer edges between assets; trace `DNS → security → LB → gateway → service` as JSON / Graphviz / Cytoscape view |
+| 10 — Network topology       | shipped  | `auditor topology` subcommand → JSON / DOT / Mermaid (vanilla; no Cytoscape vendoring — same rationale as Phase 5). Resolvers: `dnsToTarget` (cross-cloud heuristic), `wafBinding` (skeleton), `lbToGateway` (OCI LB → K8s Service by external IP), `gatewayToService` (Ingress / HTTPRoute → backing Service, exact). `/api/v1/topology` endpoint returns `{nodes, edges}` JSON |
 
 ## Docs
 

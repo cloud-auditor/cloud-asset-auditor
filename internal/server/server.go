@@ -105,6 +105,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/providers", s.handleProviders)
 	s.mux.HandleFunc("GET /api/v1/audit", s.handleAuditSSE)
 	s.mux.HandleFunc("GET /api/v1/audit/export", s.handleAuditExport)
+	s.mux.HandleFunc("GET /api/v1/topology", s.handleTopology)
 }
 
 func validateAuth(cfg Config) error {

@@ -50,6 +50,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newServeCmd(state))
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newProvidersCmd(state))
+	cmd.AddCommand(newTopologyCmd(state))
 	return cmd
 }
 
