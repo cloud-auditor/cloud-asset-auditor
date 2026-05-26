@@ -100,17 +100,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Install trivy via the upstream-recommended script rather than
+      # aquasecurity/trivy-action — same rationale as the lint + gosec
+      # jobs: third-party actions' pinned versions drift out from under
+      # us, and the binary install pattern is reproducible and matches
+      # how the other security tools in this CI suite are bootstrapped.
+      - name: Install trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
       - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          # Pin by digest so we scan exactly the image build emitted.
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}
-          format: sarif
-          output: trivy-results.sarif
-          severity: HIGH,CRITICAL
-          exit-code: "1"
-          ignore-unfixed: true
-          trivyignores: .trivyignore
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}
+        run: |
+          # Pin scan target by digest so it's exactly the image the
+          # build job pushed, not whatever ":latest" resolves to now.
+          trivy image \
+            --format sarif \
+            --output trivy-results.sarif \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile .trivyignore \
+            "$IMAGE"
 
       - name: Upload SARIF to GitHub Security
         if: always()
