@@ -1,0 +1,96 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Cancel an in-flight run for the same branch when a new push arrives.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: go test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race -cover -coverprofile=coverage.out ./...
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  security:
+    name: gosec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # Pinning to a tag (not @master) so we don't pick up un-vetted action changes.
+      - uses: securego/gosec@v2.21.4
+        with:
+          args: '-exclude-dir=internal/server/web ./...'
+
+  helm:
+    name: helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - run: helm lint deploy/helm/cloud-asset-auditor
+      - run: helm lint deploy/helm/cloud-asset-auditor -f deploy/helm/cloud-asset-auditor/examples/values-cronjob.yaml
+      - run: helm lint deploy/helm/cloud-asset-auditor -f deploy/helm/cloud-asset-auditor/examples/values-deployment.yaml
+      - name: helm template (cronjob)
+        run: helm template auditor deploy/helm/cloud-asset-auditor -f deploy/helm/cloud-asset-auditor/examples/values-cronjob.yaml > /dev/null
+      - name: helm template (deployment)
+        run: helm template auditor deploy/helm/cloud-asset-auditor -f deploy/helm/cloud-asset-auditor/examples/values-deployment.yaml > /dev/null
+
+  smoke:
+    name: build + smoke
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: |
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags="-s -w \
+              -X github.com/cloud-auditor/cloud-asset-auditor/internal/version.Version=ci-$GITHUB_SHA \
+              -X github.com/cloud-auditor/cloud-asset-auditor/internal/version.Commit=$GITHUB_SHA" \
+            -o auditor ./cmd/auditor
+      - name: Smoke checks
+        run: |
+          ./auditor --help
+          ./auditor version
+          ./auditor providers
+          # init-plan.md Phase 1 exit criterion: `audit --provider none -o json` returns `[]`
+          out=$(./auditor audit --provider none -o json)
+          [ "$out" = "[]" ] || { echo "expected [] got $out" >&2; exit 1; }

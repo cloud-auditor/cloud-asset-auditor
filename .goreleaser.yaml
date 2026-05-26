@@ -1,0 +1,118 @@
+# Goreleaser v2 config — see https://goreleaser.com/
+#
+# Triggered by .github/workflows/release.yml on `v*` tag push. Produces:
+#   - cross-platform binaries (linux/darwin/windows × amd64/arm64)
+#   - SHA256 checksums file
+#   - cosign keyless signatures (OIDC via GitHub Actions)
+#   - a GitHub Release with grouped changelog
+#
+# The container image is built separately in docker.yml, not here, so the
+# `dockers:` and `docker_manifests:` sections are intentionally absent.
+version: 2
+
+project_name: auditor
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: auditor
+    main: ./cmd/auditor
+    binary: auditor
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/cloud-auditor/cloud-asset-auditor/internal/version.Version={{ .Version }}
+      - -X github.com/cloud-auditor/cloud-asset-auditor/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/cloud-auditor/cloud-asset-auditor/internal/version.Date={{ .Date }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Windows on arm64 has limited demand for a CLI like this.
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE*
+      - CLAUDE.md
+      - init-plan.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Cosign keyless signing of the checksums file. The GitHub Actions runner
+# supplies an OIDC token; sigstore issues a short-lived cert from Fulcio
+# and the signature lands in the Rekor transparency log. No long-lived
+# keys to manage.
+signs:
+  - id: checksums
+    cmd: cosign
+    artifacts: checksum
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+    output: true
+
+sboms:
+  - id: archive
+    artifacts: archive
+    documents:
+      - "${artifact}.sbom.spdx.json"
+
+release:
+  github:
+    owner: cloud-auditor
+    name: cloud-asset-auditor
+  prerelease: auto
+  draft: false
+  mode: keep-existing
+  header: |
+    Verify with cosign + the published checksums.txt signature:
+    ```bash
+    cosign verify-blob \
+      --certificate-identity-regexp 'https://github\.com/cloud-auditor/cloud-asset-auditor/.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      --signature checksums.txt.sig \
+      checksums.txt
+    ```
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+      - "^ci:"
+      - "merge conflict"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([^)]+\))?:.*$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\([^)]+\))?:.*$'
+      order: 1
+    - title: Other
+      order: 999

@@ -30,7 +30,6 @@ func (s *Server) runProviders(ctx context.Context, names []string) (assets <-cha
 
 	var wg sync.WaitGroup
 	for _, p := range selected {
-		p := p
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

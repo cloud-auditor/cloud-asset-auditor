@@ -68,7 +68,6 @@ func (p *Provider) run(ctx context.Context, assets chan<- core.Asset, errs chan<
 
 	// Per-zone (DNS is implemented; rest are stubs).
 	for _, z := range zones {
-		z := z
 		collect("dns/"+z.Name, func(c context.Context) error { return p.collectDNS(c, z, assets) })
 		collect("page-rules/"+z.Name, func(c context.Context) error { return p.collectPageRules(c, z, assets) })
 		collect("load-balancers/"+z.Name, func(c context.Context) error { return p.collectLoadBalancers(c, z, assets) })

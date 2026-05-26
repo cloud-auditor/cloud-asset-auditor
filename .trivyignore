@@ -1,0 +1,5 @@
+# Suppress specific CVEs the team has reviewed and accepted.
+# Format: one CVE per line. Add a comment above each entry explaining the
+# decision (date, reason, expiry condition).
+#
+# Empty by default — every new CVE should be triaged on its own.

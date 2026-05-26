@@ -218,7 +218,6 @@ func runProviders(ctx context.Context, providers []core.Provider) (<-chan core.A
 
 	var wg sync.WaitGroup
 	for _, p := range providers {
-		p := p
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

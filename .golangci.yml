@@ -1,0 +1,44 @@
+# golangci-lint v1.x config. See https://golangci-lint.run/usage/configuration/
+run:
+  timeout: 5m
+  go: "1.26"
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck     # unhandled errors
+    - govet        # standard go vet checks
+    - ineffassign  # unused assignments
+    - staticcheck  # the comprehensive one; includes gosimple + stylecheck rules
+    - unused       # unused identifiers
+    - misspell     # English-only misspellings
+    - gofmt        # standard go formatting
+    - goimports    # import grouping / unused import removal
+    - copyloopvar  # Go 1.22+ loop-var capture redundancy
+    - bodyclose    # http.Response.Body must be Close()d
+    - errorlint    # errors.Is/As usage instead of == / type-assertion
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/cloud-auditor/cloud-asset-auditor
+  staticcheck:
+    checks: ["all"]
+  errcheck:
+    exclude-functions:
+      - (io.Writer).Write
+      - fmt.Fprintln
+      - fmt.Fprintf
+      - fmt.Fprint
+      - (encoding/json.Encoder).Encode  # we wrap most of these; the encoder errors land in the writer
+
+issues:
+  exclude-rules:
+    # Tests legitimately use Background context, ignore many error returns
+    # in setup helpers, etc.
+    - path: '_test\.go'
+      linters: [errcheck, bodyclose]
+    # Stub collector files intentionally accept-and-ignore their arguments.
+    - path: 'internal/providers/.*/stubs\.go'
+      linters: [revive, unparam]
+  max-issues-per-linter: 0
+  max-same-issues: 0

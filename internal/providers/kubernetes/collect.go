@@ -49,7 +49,6 @@ func (p *Provider) run(ctx context.Context, assets chan<- core.Asset, errs chan<
 	}
 
 	for _, t := range targets {
-		t := t
 		label := t.GVR.String()
 		g.Go(func() error {
 			if err := p.listResource(gctx, t, assets); err != nil && !errors.Is(err, context.Canceled) {

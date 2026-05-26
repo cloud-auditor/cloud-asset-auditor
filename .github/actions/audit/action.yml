@@ -1,0 +1,142 @@
+name: "Cloud Asset Audit"
+description: >
+  Run cloud-asset-auditor against your configured providers. Downloads the
+  matching release binary, runs the audit, and (optionally) uploads the
+  output as a workflow artifact.
+
+inputs:
+  providers:
+    description: >
+      Comma-separated provider names to scan (e.g. "cloudflare,kubernetes").
+      Empty means every provider the binary has registered.
+    required: false
+    default: ""
+  output-file:
+    description: "Path to write the audit output."
+    required: false
+    default: "assets.json"
+  output-format:
+    description: "Output format: json | csv | ndjson"
+    required: false
+    default: "json"
+  version:
+    description: >
+      auditor version to use (without leading 'v'). When empty, derived
+      from the action ref; if that's not a semver tag, falls back to the
+      latest GitHub Release.
+    required: false
+    default: ""
+  upload-artifact:
+    description: 'Upload the output file as a workflow artifact ("true"|"false")'
+    required: false
+    default: "true"
+  artifact-name:
+    description: "Name for the uploaded artifact (when upload-artifact is true)."
+    required: false
+    default: "cloud-asset-audit"
+
+outputs:
+  asset-count:
+    description: "Number of assets collected."
+    value: ${{ steps.run.outputs.count }}
+  output-path:
+    description: "Absolute path to the output file."
+    value: ${{ steps.run.outputs.path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve version
+      id: version
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: |
+        set -euo pipefail
+        VERSION="${INPUT_VERSION:-${ACTION_REF}}"
+        VERSION="${VERSION#v}"
+        # If the ref isn't a semver-looking tag (e.g., the user pinned to
+        # `main` or a branch), fall back to whatever is the latest release.
+        if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          VERSION=$(curl -fsSL https://api.github.com/repos/cloud-auditor/cloud-asset-auditor/releases/latest \
+            | grep -o '"tag_name":[[:space:]]*"v\?[^"]*"' \
+            | head -1 \
+            | sed -E 's/.*"v?([^"]+)".*/\1/')
+        fi
+        if [ -z "$VERSION" ]; then
+          echo "could not resolve a version (no release found?)" >&2
+          exit 1
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "Using auditor version $VERSION"
+
+    - name: Download auditor binary
+      shell: bash
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        set -euo pipefail
+        OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        ARCH="$(uname -m)"
+        case "$ARCH" in
+          x86_64)        ARCH=amd64 ;;
+          aarch64|arm64) ARCH=arm64 ;;
+          *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+        esac
+        URL="https://github.com/cloud-auditor/cloud-asset-auditor/releases/download/v${VERSION}/auditor_${VERSION}_${OS}_${ARCH}.tar.gz"
+        echo "Fetching $URL"
+        tmp="$(mktemp -d)"
+        curl -fsSL "$URL" | tar -xz -C "$tmp"
+        install -m 0755 "$tmp/auditor" "$RUNNER_TEMP/auditor"
+        echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+    - name: Run audit
+      id: run
+      shell: bash
+      env:
+        PROVIDERS: ${{ inputs.providers }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+        OUTPUT_FORMAT: ${{ inputs.output-format }}
+      run: |
+        set -euo pipefail
+        ARGS=()
+        if [ -n "$PROVIDERS" ]; then
+          ARGS+=(--provider "$PROVIDERS")
+        fi
+        ARGS+=(-o "$OUTPUT_FORMAT" --output-file "$OUTPUT_FILE")
+
+        # The auditor exits 2 on partial provider failure (some providers
+        # produced results, others errored). We treat that as a soft
+        # warning here so the workflow can still inspect the partial
+        # output — flip to `exit 2` if you want CI to hard-fail.
+        set +e
+        "$RUNNER_TEMP/auditor" audit "${ARGS[@]}"
+        rc=$?
+        set -e
+        if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+          echo "auditor exited $rc" >&2
+          exit "$rc"
+        fi
+        if [ "$rc" -eq 2 ]; then
+          echo "::warning::auditor returned partial failure (exit 2)"
+        fi
+
+        case "$OUTPUT_FORMAT" in
+          json)   COUNT=$(jq 'length' "$OUTPUT_FILE") ;;
+          ndjson) COUNT=$(wc -l < "$OUTPUT_FILE" | tr -d ' ') ;;
+          csv)    COUNT=$(($(wc -l < "$OUTPUT_FILE") - 1)) ;;  # minus the header
+          *)      COUNT="unknown" ;;
+        esac
+        echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+        echo "path=$(realpath "$OUTPUT_FILE")" >> "$GITHUB_OUTPUT"
+        echo "Collected $COUNT assets → $OUTPUT_FILE"
+
+    - name: Upload artifact
+      if: inputs.upload-artifact == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.output-file }}
+        if-no-files-found: error
+        retention-days: 30

@@ -4,13 +4,14 @@ Single-binary CLI (and, eventually, web UI) that inventories cloud assets
 across OCI, Cloudflare, and Kubernetes into one canonical schema, with
 JSON or CSV output.
 
-> **Status: Phases 1–7.** Shipped: foundation, JSON / CSV renderers, CLI,
+> **Status: Phases 1–8.** Shipped: foundation, JSON / CSV renderers, CLI,
 > Cloudflare provider (zones + DNS; 11 stubs), OCI provider (compartments +
 > regions + Compute + Load Balancers; 15 stubs), Kubernetes provider
 > (universal via dynamic-client + discovery), the web UI (`auditor serve`),
-> the Docker image (multi-stage → distroless static, non-root), and the
-> Helm chart (`deploy/helm/cloud-asset-auditor/` — CronJob + Deployment modes,
-> BYO credentials Secret, read-only ClusterRole). GitHub Actions (Phase 8)
+> the Docker image (multi-stage → distroless static, non-root), the Helm
+> chart (CronJob + Deployment modes), and GitHub Actions (CI, goreleaser
+> release with cosign keyless, multi-arch GHCR image with Trivy scan, plus
+> a reusable composite `audit` action other repos can `uses:`). Docs (Phase 9)
 > is next. See [`init-plan.md`](./init-plan.md) for the full phased plan
 > and [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
 
@@ -159,6 +160,33 @@ Forbidden responses per-resource.
 Full chart docs and the complete values reference live in
 [`deploy/helm/cloud-asset-auditor/README.md`](./deploy/helm/cloud-asset-auditor/README.md).
 
+## CI / Release
+
+GitHub Actions live in `.github/workflows/`:
+
+| Workflow      | Trigger                          | What it does                                                                                                    |
+| ------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `ci.yml`      | PR + push to `main`              | Parallel jobs: `go test -race -cover`, golangci-lint, gosec, helm lint + template, build + smoke (`audit --provider none -o json == []`) |
+| `release.yml` | Push of a `v*` tag               | `goreleaser` cross-builds (linux / darwin / windows × amd64 / arm64) + SHA256 checksums + cosign keyless OIDC signature + SBOM (syft) + GitHub Release |
+| `docker.yml`  | Push to `main` + `v*` tags + PRs | Buildx multi-arch (linux/amd64 + linux/arm64) image push to `ghcr.io/cloud-auditor/cloud-asset-auditor` with cosign signing, then Trivy scan (HIGH/CRITICAL gate; suppress via `.trivyignore`) with SARIF upload to GitHub Security |
+
+The reusable composite action at `.github/actions/audit/action.yml` lets
+other repos run an audit in one step:
+
+```yaml
+- uses: cloud-auditor/cloud-asset-auditor/.github/actions/audit@v1
+  with:
+    providers: cloudflare,kubernetes
+    output-file: assets.json
+  env:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    KUBECONFIG: ${{ runner.temp }}/kubeconfig
+```
+
+The action downloads the matching release tarball (pinned by the action
+ref, with a fallback to the latest release when the ref isn't a semver
+tag), runs the audit, and uploads the output as a workflow artifact.
+
 Minimum permissions for what's implemented today:
 
 - **Cloudflare**: API token with **Zone:Read** + **Zone.DNS:Read** at the account level.
@@ -255,7 +283,7 @@ A full extending guide ships in Phase 9.
 | 5 — Web UI                  | shipped  | Embedded SPA + JSON/SSE API. `auditor serve --addr ... --auth none\|basic\|token`. Streamed asset table, filter / sort / type+provider facets, CSV/JSON export, graceful shutdown. Plain JS rather than the planned Alpine.js — keeps the binary fully self-contained |
 | 6 — Docker                  | shipped  | Multi-stage build → `gcr.io/distroless/static-debian12:nonroot`. Non-root (UID 65532), reproducible-ish (`-trimpath`, ldflags-injected version), accepts `--platform` for multi-arch. ~75 MB rather than the plan's <30 MB target (cloudflare-go/v4 + oci-go-sdk/v65 + k8s client-go are large) |
 | 7 — Helm chart              | shipped  | `deploy/helm/cloud-asset-auditor/` — CronJob (default, optional PVC for persisted output) and Deployment (Service + optional Ingress) modes. BYO credentials Secret (`existingSecret`). Read-only `get,list` ClusterRole (overridable). Example values for both modes |
-| 8 — GitHub Actions          | planned  | CI, goreleaser, multi-arch GHCR image, reusable composite action |
+| 8 — GitHub Actions          | shipped  | `ci.yml` (test + lint + gosec + helm lint + smoke), `release.yml` (goreleaser cross-build + cosign keyless + SBOM), `docker.yml` (multi-arch GHCR push + cosign image sign + Trivy SARIF), reusable `actions/audit` composite |
 | 9 — Docs                    | planned  | Per-provider IAM minimums, extending guide, generated CLI docs |
 | 10 — Network topology       | planned  | Infer edges between assets; trace `DNS → security → LB → gateway → service` as JSON / Graphviz / Cytoscape view |
 
