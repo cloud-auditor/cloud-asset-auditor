@@ -13,6 +13,10 @@ import (
 	"io/fs"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/telemetry"
 )
 
 // Config controls server behavior.
@@ -55,10 +59,26 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// Handler returns the underlying http.Handler (mux). Useful for tests that
-// want to wrap it in httptest.NewServer without binding a real port.
+// Handler returns the underlying http.Handler (mux), wrapped in:
+//  1. otelhttp middleware (request spans, filtered to skip /healthz noise)
+//  2. auth middleware (basic/token gate on /api/*)
+//  3. the mux itself
+//
+// Useful for tests that want to wrap the result in httptest.NewServer
+// without binding a real port.
 func (s *Server) Handler() http.Handler {
-	return s.authMiddleware(s.mux)
+	return otelhttp.NewHandler(
+		s.authMiddleware(s.mux),
+		telemetry.ServiceName,
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			return r.Method + " " + r.URL.Path
+		}),
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			// /healthz is hit by k8s probes every few seconds — emitting
+			// a span per probe drowns the actual interesting requests.
+			return r.URL.Path != "/healthz"
+		}),
+	)
 }
 
 // Run binds the listener and blocks until ctx is cancelled, then performs a

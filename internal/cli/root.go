@@ -9,13 +9,18 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/config"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/logging"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/telemetry"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/version"
 )
+
+const telemetryShutdownGrace = 5 * time.Second
 
 // cliState carries cross-cutting state between cobra commands. It's
 // populated by PersistentPreRunE on the root command and read inside each
@@ -64,12 +69,26 @@ func newRootCmd() *cobra.Command {
 			}
 			state.logger = logger
 			logging.SetDefault(logger)
+
+			// Bind --tracing too so AUDITOR_TRACING / config-file keys
+			// take effect, then install the OTel TracerProvider. Off
+			// mode is the default and pays zero overhead.
+			if err := v.BindPFlag("tracing", cmd.Root().PersistentFlags().Lookup("tracing")); err != nil {
+				return fmt.Errorf("bind tracing: %w", err)
+			}
+			if err := telemetry.Setup(cmd.Context(), telemetry.Options{
+				Mode:           v.GetString("tracing"),
+				ServiceVersion: version.Get().Version,
+			}); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
 	cmd.PersistentFlags().StringVar(&state.cfgFile, "config", "", "path to config file")
 	cmd.PersistentFlags().String("log-level", "info", "log level: debug|info|warn|error")
 	cmd.PersistentFlags().String("log-format", "text", "log format: text|json")
+	cmd.PersistentFlags().String("tracing", "off", "tracing mode: off|stdout|otlp (honors OTEL_EXPORTER_OTLP_* env vars)")
 
 	cmd.AddCommand(newAuditCmd(state))
 	cmd.AddCommand(newServeCmd(state))
@@ -87,6 +106,16 @@ func newRootCmd() *cobra.Command {
 func Execute() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Flush any pending OTel spans before the process exits. No-op when
+	// --tracing=off; bounded so a wedged exporter can't hang the binary.
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), telemetryShutdownGrace)
+		defer cancel()
+		if err := telemetry.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintln(os.Stderr, "warning: telemetry shutdown:", err)
+		}
+	}()
 
 	if err := newRootCmd().ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)

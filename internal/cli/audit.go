@@ -12,9 +12,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/output"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/telemetry"
 )
 
 func newAuditCmd(s *cliState) *cobra.Command {
@@ -211,11 +214,29 @@ func selectProviders(names []string) []core.Provider {
 // channels. Both returned channels are closed exactly once, when every
 // provider has finished. If providers is empty, the channels close
 // immediately so the renderer emits an empty result.
+//
+// Instrumentation: wraps the work in an "audit" span and emits a
+// "provider.collect" child span per provider. The child span's ctx is
+// passed into Provider.Collect so SDK calls inherit the trace.
 func runProviders(ctx context.Context, providers []core.Provider) (<-chan core.Asset, <-chan error) {
 	assets := make(chan core.Asset)
 	errs := make(chan error)
 
+	// Open the parent span BEFORE the no-providers check so every audit
+	// — including the smoke-test empty one — produces a trace. Ops want
+	// to see "user ran an audit but selected zero providers" too.
+	names := make([]string, len(providers))
+	for i, p := range providers {
+		names[i] = p.Name()
+	}
+	ctx, parentSpan := telemetry.Tracer().Start(ctx, "audit",
+		trace.WithAttributes(
+			attribute.StringSlice("audit.providers", names),
+			attribute.Int("audit.provider_count", len(providers)),
+		))
+
 	if len(providers) == 0 {
+		parentSpan.End()
 		close(assets)
 		close(errs)
 		return assets, errs
@@ -226,14 +247,18 @@ func runProviders(ctx context.Context, providers []core.Provider) (<-chan core.A
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			pAssets, pErrs := p.Collect(ctx)
-			forward(ctx, pAssets, pErrs, assets, errs)
+			pCtx, pSpan := telemetry.Tracer().Start(ctx, "provider.collect",
+				trace.WithAttributes(attribute.String("provider.name", p.Name())))
+			defer pSpan.End()
+			pAssets, pErrs := p.Collect(pCtx)
+			forward(pCtx, pAssets, pErrs, assets, errs)
 		}()
 	}
 	go func() {
 		wg.Wait()
 		close(assets)
 		close(errs)
+		parentSpan.End()
 	}()
 	return assets, errs
 }

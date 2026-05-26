@@ -8,7 +8,11 @@ import (
 	"strings"
 	"sync"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/telemetry"
 )
 
 // runProviders is the server-side equivalent of internal/cli/audit.go's
@@ -23,7 +27,23 @@ func (s *Server) runProviders(ctx context.Context, names []string) (assets <-cha
 	a := make(chan core.Asset)
 	e := make(chan error)
 
+	// Parent span lives for the audit; child span per provider so a
+	// trace viewer shows which provider hung when one stalls. The
+	// HTTP-handler span (from otelhttp middleware) is this span's
+	// parent via the request context. Opened BEFORE the no-providers
+	// short-circuit so every browser request produces a trace.
+	providerNames := make([]string, len(selected))
+	for i, p := range selected {
+		providerNames[i] = p.Name()
+	}
+	ctx, parentSpan := telemetry.Tracer().Start(ctx, "audit",
+		trace.WithAttributes(
+			attribute.StringSlice("audit.providers", providerNames),
+			attribute.Int("audit.provider_count", len(selected)),
+		))
+
 	if len(selected) == 0 {
+		parentSpan.End()
 		close(a)
 		close(e)
 		return a, e, initErrors
@@ -34,14 +54,18 @@ func (s *Server) runProviders(ctx context.Context, names []string) (assets <-cha
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			pAssets, pErrs := p.Collect(ctx)
-			forward(ctx, pAssets, pErrs, a, e)
+			pCtx, pSpan := telemetry.Tracer().Start(ctx, "provider.collect",
+				trace.WithAttributes(attribute.String("provider.name", p.Name())))
+			defer pSpan.End()
+			pAssets, pErrs := p.Collect(pCtx)
+			forward(pCtx, pAssets, pErrs, a, e)
 		}()
 	}
 	go func() {
 		wg.Wait()
 		close(a)
 		close(e)
+		parentSpan.End()
 	}()
 	return a, e, initErrors
 }

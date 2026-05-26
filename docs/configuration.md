@@ -38,6 +38,31 @@ shouldn't take the process down.
 
 ---
 
+## Tracing (applies to every subcommand)
+
+Optional OpenTelemetry tracing. Off by default — pays zero overhead until
+turned on. Every audit run produces a parent `audit` span with one
+`provider.collect` child span per provider; the HTTP server emits one
+span per request (with `/healthz` filtered out as noise).
+
+| Flag         | Env / config key  | Default | Notes                                            |
+| ------------ | ----------------- | ------- | ------------------------------------------------ |
+| `--tracing`  | `AUDITOR_TRACING` | `off`   | `off` \| `stdout` \| `otlp`                      |
+
+- **`off`** — `noop` tracer installed; `telemetry.Tracer().Start(...)` is a free no-op everywhere in the code.
+- **`stdout`** — pretty-printed span JSON to **stderr** (not stdout, so renderer output stays pipe-friendly). Useful for local dev.
+- **`otlp`** — OTLP/HTTP exporter to a collector (Jaeger / Tempo / Grafana Agent / OTel Collector). Honors the standard OTel SDK env vars:
+  - `OTEL_EXPORTER_OTLP_ENDPOINT` — e.g. `https://otel.example.com:4318`
+  - `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` — overrides the above for traces only
+  - `OTEL_EXPORTER_OTLP_HEADERS` — e.g. `Authorization=Bearer ...`
+  - Full env-var spec: https://opentelemetry.io/docs/specs/otel/protocol/exporter/
+
+`--tracing=stdout` uses **stderr** (not stdout) intentionally — the
+renderer-output discipline that lets `auditor audit -o json | jq` work
+applies to tracing output too.
+
+---
+
 ## `auditor audit`
 
 Collect assets from one or more providers and render them as JSON or CSV.
