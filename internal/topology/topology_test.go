@@ -176,10 +176,10 @@ func TestFilterByHostname_KeepsConnectedComponent(t *testing.T) {
 	// K8s Ingress — they're all reachable from the api.example.com
 	// record via the edge graph.
 	wantTypes := map[string]bool{
-		"cloudflare.dns_record":          false,
-		"oci.load_balancer":              false,
-		"v1.Service":                     false,
-		"networking.k8s.io/v1.Ingress":   false,
+		"cloudflare.dns_record":        false,
+		"oci.load_balancer":            false,
+		"v1.Service":                   false,
+		"networking.k8s.io/v1.Ingress": false,
 	}
 	for _, n := range scoped.Nodes {
 		if _, ok := wantTypes[n.Type]; ok {
@@ -241,7 +241,7 @@ func TestRenderer_JSON_OmitsRaw(t *testing.T) {
 	}
 	// Sanity: it does contain `edges`.
 	var parsed struct {
-		Edges []core.Edge `json:"edges"`
+		Edges []core.Edge  `json:"edges"`
 		Nodes []core.Asset `json:"nodes"`
 	}
 	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
@@ -263,7 +263,7 @@ func TestRenderer_DOT_HasGraphvizSyntax(t *testing.T) {
 	for _, want := range []string{
 		"digraph topology",
 		"rankdir=LR",
-		"->",   // at least one edge
+		"->", // at least one edge
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("DOT output missing %q\n%s", want, out)
@@ -305,10 +305,10 @@ func TestRenderer_Excalidraw_StructureAndBindings(t *testing.T) {
 	}
 
 	var doc struct {
-		Type     string                   `json:"type"`
-		Version  int                      `json:"version"`
-		Elements []map[string]any         `json:"elements"`
-		AppState map[string]any           `json:"appState"`
+		Type     string           `json:"type"`
+		Version  int              `json:"version"`
+		Elements []map[string]any `json:"elements"`
+		AppState map[string]any   `json:"appState"`
 	}
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())

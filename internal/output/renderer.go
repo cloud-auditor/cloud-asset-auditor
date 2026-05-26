@@ -1,3 +1,7 @@
+// Package output renders streams of core.Asset values into one of the
+// supported wire formats (JSON array, NDJSON, CSV). Each renderer drains
+// the input channel incrementally so memory stays bounded regardless of
+// inventory size.
 package output
 
 import (

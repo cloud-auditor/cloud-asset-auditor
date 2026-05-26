@@ -1,3 +1,8 @@
+// Package core defines the contracts every provider and renderer in the
+// project shares: the canonical Asset shape, the Provider interface
+// providers implement, the AssetRef / Edge types the topology package
+// consumes, and the registry that the CLI uses to enumerate providers
+// by name at runtime.
 package core
 
 import (

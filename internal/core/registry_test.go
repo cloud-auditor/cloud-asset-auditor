@@ -7,8 +7,8 @@ import (
 
 type fakeProvider struct{ name string }
 
-func (f *fakeProvider) Name() string                       { return f.name }
-func (f *fakeProvider) Validate(_ context.Context) error   { return nil }
+func (f *fakeProvider) Name() string                     { return f.name }
+func (f *fakeProvider) Validate(_ context.Context) error { return nil }
 func (f *fakeProvider) Collect(_ context.Context) (<-chan Asset, <-chan error) {
 	a := make(chan Asset)
 	e := make(chan error)

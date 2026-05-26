@@ -69,10 +69,10 @@ func resolveAuth(profile string) (common.ConfigurationProvider, error) {
 // SDK's instance-principal call would otherwise incur on a laptop.
 func onOCIInstance() bool {
 	client := &http.Client{Timeout: 250 * time.Millisecond}
-	resp, err := client.Get("http://169.254.169.254/opc/v2/instance/")
+	resp, err := client.Get("http://169.254.169.254/opc/v2/instance/") //nolint:gosec // IMDS endpoint, intentional
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode == http.StatusOK
 }

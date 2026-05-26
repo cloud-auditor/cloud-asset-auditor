@@ -36,9 +36,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+      # Install from source so the linter is built with the same Go
+      # toolchain setup-go just installed (Go 1.26+). The
+      # golangci-lint-action's `latest` alias still resolves to the v1.x
+      # series, which was built with Go 1.24 and refuses to lint code
+      # targeting newer Go versions.
+      - name: Install golangci-lint v2
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: golangci-lint run
+        run: golangci-lint run ./...
 
   security:
     name: gosec

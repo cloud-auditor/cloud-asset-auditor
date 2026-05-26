@@ -28,16 +28,16 @@ func (excalidrawRenderer) Render(t *Topology, w io.Writer) error {
 	elements := buildExcalidrawElements(t, layout)
 
 	doc := map[string]any{
-		"type":    "excalidraw",
-		"version": 2,
-		"source":  "https://github.com/cloud-auditor/cloud-asset-auditor",
+		"type":     "excalidraw",
+		"version":  2,
+		"source":   "https://github.com/cloud-auditor/cloud-asset-auditor",
 		"elements": elements,
 		"appState": map[string]any{
-			"viewBackgroundColor":     "#ffffff",
-			"currentItemFontFamily":   2, // Helvetica — legible, not the rough Virgil
-			"currentItemStrokeColor":  "#1f2328",
-			"currentItemRoughness":    1,
-			"gridSize":                20,
+			"viewBackgroundColor":    "#ffffff",
+			"currentItemFontFamily":  2, // Helvetica — legible, not the rough Virgil
+			"currentItemStrokeColor": "#1f2328",
+			"currentItemRoughness":   1,
+			"gridSize":               20,
 		},
 		"files": map[string]any{},
 	}
@@ -53,12 +53,12 @@ func (excalidrawRenderer) Render(t *Topology, w io.Writer) error {
 // ---------------------------------------------------------------------
 
 const (
-	boxWidth     = 240.0
-	boxHeight    = 70.0
-	hSpacing     = 350.0
-	vSpacing     = 110.0
-	marginX      = 40.0
-	marginY      = 40.0
+	boxWidth  = 240.0
+	boxHeight = 70.0
+	hSpacing  = 350.0
+	vSpacing  = 110.0
+	marginX   = 40.0
+	marginY   = 40.0
 )
 
 type position struct{ x, y float64 }

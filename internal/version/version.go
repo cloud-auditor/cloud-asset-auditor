@@ -1,9 +1,13 @@
+// Package version exposes ldflags-injected build metadata (Version, Commit,
+// Date) plus a runtime/debug fallback so `go run` and unbuilt binaries
+// still emit something useful from `auditor version`.
 package version
 
 import "runtime/debug"
 
 // These are overridden at build time via:
-//   go build -ldflags "-X github.com/cloud-auditor/cloud-asset-auditor/internal/version.Version=v0.1.0 ..."
+//
+//	go build -ldflags "-X github.com/cloud-auditor/cloud-asset-auditor/internal/version.Version=v0.1.0 ..."
 var (
 	Version = "dev"
 	Commit  = "none"

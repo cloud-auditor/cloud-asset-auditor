@@ -17,11 +17,12 @@ import (
 // can index. Long audits make this slow; tune --timeout accordingly.
 //
 // Query params:
-//   providers=cloudflare,kubernetes   subset; default = all registered
-//   hostname=api.example.com          repeatable; filters to connected component
-//   include-orphans=true              keep nodes with no edges
-//   timeout=10m                       audit timeout
-//   format=json|dot|mermaid|excalidraw   default json
+//
+//	providers=cloudflare,kubernetes   subset; default = all registered
+//	hostname=api.example.com          repeatable; filters to connected component
+//	include-orphans=true              keep nodes with no edges
+//	timeout=10m                       audit timeout
+//	format=json|dot|mermaid|excalidraw   default json
 //
 // dot / mermaid / excalidraw responses come back as attachments with a
 // sensible filename so dragging the URL into a file manager (or letting

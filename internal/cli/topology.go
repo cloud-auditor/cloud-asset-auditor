@@ -63,12 +63,12 @@ Examples:
 			// parse Raw for Service / Ingress / HTTPRoute payloads — the
 			// graph would be empty for those without it.
 			applyProviderOptions(selected, providerOptions{
-				maxConcurrency: maxConcurrency,
-				includeRaw:     true,
-				ociProfile:     v.GetString("oci-profile"),
-				ociRegions:     v.GetStringSlice("oci-regions"),
-				kubeContext:    v.GetString("kube-context"),
-				kubeNamespace:  v.GetString("kube-namespace"),
+				maxConcurrency:        maxConcurrency,
+				includeRaw:            true,
+				ociProfile:            v.GetString("oci-profile"),
+				ociRegions:            v.GetStringSlice("oci-regions"),
+				kubeContext:           v.GetString("kube-context"),
+				kubeNamespace:         v.GetString("kube-namespace"),
 				kubeExcludeNamespaces: v.GetStringSlice("kube-exclude-namespaces"),
 			})
 

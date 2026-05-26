@@ -38,7 +38,6 @@ type Config struct {
 type Provider struct {
 	cfg Config
 
-	authMu   sync.Mutex
 	authOnce sync.Once
 	auth     common.ConfigurationProvider
 	authErr  error
@@ -165,7 +164,7 @@ func derefStr(s *string) string {
 // derefTime converts the SDK's *common.SDKTime to *time.Time, returning nil
 // for nil or zero-valued inputs.
 func derefTime(t *common.SDKTime) *time.Time {
-	if t == nil || t.Time.IsZero() {
+	if t == nil || t.IsZero() { // SDKTime embeds time.Time, so IsZero promotes.
 		return nil
 	}
 	out := t.Time

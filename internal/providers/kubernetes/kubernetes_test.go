@@ -184,8 +184,8 @@ func TestFilterResources(t *testing.T) {
 			GroupVersion: "v1",
 			APIResources: []metav1.APIResource{
 				{Name: "pods", Namespaced: true, Kind: "Pod", Verbs: []string{"get", "list"}},
-				{Name: "pods/status", Namespaced: true, Kind: "Pod", Verbs: []string{"get", "list"}},     // subresource → drop
-				{Name: "nodes", Namespaced: false, Kind: "Node", Verbs: []string{"get"}},                 // no list → drop
+				{Name: "pods/status", Namespaced: true, Kind: "Pod", Verbs: []string{"get", "list"}}, // subresource → drop
+				{Name: "nodes", Namespaced: false, Kind: "Node", Verbs: []string{"get"}},             // no list → drop
 				{Name: "services", Namespaced: true, Kind: "Service", Verbs: []string{"list", "watch"}},
 			},
 		},
@@ -193,13 +193,13 @@ func TestFilterResources(t *testing.T) {
 			GroupVersion: "apps/v1",
 			APIResources: []metav1.APIResource{
 				{Name: "deployments", Namespaced: true, Kind: "Deployment", Verbs: []string{"list"}},
-				{Name: "deployments/scale", Namespaced: true, Kind: "Scale", Verbs: []string{"list"}},   // subresource → drop
+				{Name: "deployments/scale", Namespaced: true, Kind: "Scale", Verbs: []string{"list"}}, // subresource → drop
 			},
 		},
 		{
 			GroupVersion: "example.com/v1",
 			APIResources: []metav1.APIResource{
-				{Name: "widgets", Namespaced: true, Kind: "Widget", Verbs: []string{"list"}},            // CRD comes for free
+				{Name: "widgets", Namespaced: true, Kind: "Widget", Verbs: []string{"list"}}, // CRD comes for free
 			},
 		},
 	}
