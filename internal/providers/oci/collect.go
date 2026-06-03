@@ -79,9 +79,6 @@ func (p *Provider) run(ctx context.Context, assets chan<- core.Asset, errs chan<
 			collect("load-balancers "+tag, func(ctx context.Context) error {
 				return p.collectLoadBalancers(ctx, region, cOCID, assets)
 			})
-
-			// Stubs — wired so the orchestrator already covers every
-			// resource type from init-plan.md §3; fill-in is per-file.
 			collect("block-volumes "+tag, func(ctx context.Context) error {
 				return p.collectBlockVolumes(ctx, region, cOCID, assets)
 			})
@@ -118,10 +115,17 @@ func (p *Provider) run(ctx context.Context, assets chan<- core.Asset, errs chan<
 		}
 	}
 
-	// Tenancy-global resources (don't repeat per region).
-	collect("policies", func(ctx context.Context) error {
-		return p.collectPolicies(ctx, assets)
-	})
+	// IAM policies attach to any compartment, so scan each one — but only
+	// once (identity is a global service; don't repeat per region).
+	for _, c := range compartments {
+		cOCID := derefStr(c.Id)
+		cName := derefStr(c.Name)
+		collect("policies "+cName, func(ctx context.Context) error {
+			return p.collectPolicies(ctx, cOCID, assets)
+		})
+	}
+
+	// Users, groups, and dynamic groups live only at the tenancy root.
 	collect("users", func(ctx context.Context) error {
 		return p.collectUsers(ctx, assets)
 	})

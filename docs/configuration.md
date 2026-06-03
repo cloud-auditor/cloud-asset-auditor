@@ -127,14 +127,15 @@ spec entry (or vice versa) fails CI.
 
 ## `auditor audit`
 
-Collect assets from one or more providers and render them as JSON or CSV.
+Collect assets from one or more providers and render them as JSON, CSV, or XLSX.
 
 | Flag                              | Env / config key                     | Default       | Notes |
 | --------------------------------- | ------------------------------------ | ------------- | ----- |
 | `--provider strings`              | `AUDITOR_PROVIDER`                   | (all)         | Comma-separated. Use the literal `none` to run zero providers. |
-| `-o`, `--output string`           | `AUDITOR_OUTPUT`                     | `json`        | `json` or `csv` |
-| `--output-file string`            | `AUDITOR_OUTPUT_FILE`                | stdout        | `-` is treated as stdout |
+| `-o`, `--output string`           | `AUDITOR_OUTPUT`                     | `json`        | `json`, `csv`, or `xlsx` |
+| `--output-file string`            | `AUDITOR_OUTPUT_FILE`                | stdout        | `-` is treated as stdout. Required for `xlsx` unless stdout is redirected (it's binary). |
 | `--stream`                        | `AUDITOR_STREAM`                     | `false`       | With `-o json`, emit NDJSON (one object per line) instead of an array |
+| `--sheet-by string`               | `AUDITOR_SHEET_BY`                   | `provider`    | With `-o xlsx`, split assets across worksheets: `none\|provider\|type\|region\|account\|tag:KEY` (e.g. `tag:compartment_id`) |
 | `--include-raw`                   | `AUDITOR_INCLUDE_RAW`                | `false`       | Attach the full upstream SDK payload to each `Asset.Raw` |
 | `--max-concurrency int`           | `AUDITOR_MAX_CONCURRENCY`            | `5`           | Per-provider parallelism cap |
 | `--timeout duration`              | `AUDITOR_TIMEOUT`                    | `10m`         | Overall audit timeout |

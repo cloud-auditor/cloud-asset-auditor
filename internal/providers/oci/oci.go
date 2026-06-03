@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -44,6 +45,13 @@ type Provider struct {
 
 	tenancyOCID string
 	homeRegion  string
+
+	// Object Storage's namespace is tenancy-global; resolve it once and
+	// share the result across every per-(region, compartment) bucket
+	// collector instead of paying a GetNamespace round-trip each time.
+	nsOnce sync.Once
+	nsName string
+	nsErr  error
 }
 
 // Compile-time checks for the optional interfaces.
@@ -169,6 +177,23 @@ func derefTime(t *common.SDKTime) *time.Time {
 	}
 	out := t.Time
 	return &out
+}
+
+// i64Str formats an optional *int64 (sizes, memory) as a tag value,
+// returning "" for nil so an unset field reads as empty rather than "0".
+func i64Str(p *int64) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.FormatInt(*p, 10)
+}
+
+// iStr is i64Str for the SDK's *int fields (counts).
+func iStr(p *int) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.Itoa(*p)
 }
 
 // mergeFreeformTags copies freeform tags into a fresh map, leaving room for

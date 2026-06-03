@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xuri/excelize/v2"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/server"
 )
@@ -133,6 +136,34 @@ func TestAuditExport_CSVHeaderOnly(t *testing.T) {
 	want := "provider,account_id,region,type,id,name,status,created_at,tags\n"
 	if got != want {
 		t.Errorf("CSV body = %q, want %q", got, want)
+	}
+}
+
+func TestAuditExport_XLSX(t *testing.T) {
+	ts := newTestServer(t, server.Config{})
+
+	resp, err := http.Get(ts.URL + "/api/v1/audit/export?format=xlsx&providers=none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "assets.xlsx") {
+		t.Errorf("Content-Disposition = %q, want filename assets.xlsx", cd)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	f, err := excelize.OpenReader(bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("response is not a valid xlsx: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	if got := f.GetSheetList(); len(got) == 0 {
+		t.Errorf("workbook has no sheets")
 	}
 }
 

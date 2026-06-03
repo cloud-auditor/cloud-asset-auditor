@@ -142,8 +142,17 @@ paths:
           description: Output format
           schema:
             type: string
-            enum: [json, ndjson, csv]
+            enum: [json, ndjson, csv, xlsx]
             default: json
+        - name: sheet_by
+          in: query
+          description: >
+            For `format=xlsx` only: how to partition assets across worksheets.
+            One of `none`, `provider`, `type`, `region`, `account`, or
+            `tag:KEY` (e.g. `tag:compartment_id`). Ignored for other formats.
+          schema:
+            type: string
+            default: provider
       responses:
         "200":
           description: Rendered audit output
@@ -170,6 +179,11 @@ paths:
               schema:
                 type: string
                 description: Header row plus one row per Asset; Tags flattened to k1=v1;k2=v2
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+                description: Multi-sheet Excel workbook; one worksheet per sheet_by group
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":

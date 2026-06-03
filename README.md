@@ -2,10 +2,10 @@
 
 Single-binary CLI (and, eventually, web UI) that inventories cloud assets
 across OCI, Cloudflare, and Kubernetes into one canonical schema, with
-JSON or CSV output.
+JSON, CSV, or Excel (XLSX) output.
 
-> **All phases shipped.** Foundation, JSON / CSV renderers, CLI, three
-> providers (Cloudflare zones+DNS / OCI compartments+Compute+LBs /
+> **All phases shipped.** Foundation, JSON / CSV / XLSX renderers, CLI, three
+> providers (Cloudflare zones+DNS / OCI all resource types /
 > Kubernetes universal), web UI (`auditor serve`), Docker image (distroless
 > static, non-root), Helm chart, GitHub Actions (CI + goreleaser + multi-arch
 > GHCR + Trivy + reusable `audit` action), docs, and the topology graph
@@ -51,13 +51,17 @@ and Helm chart are documented under [Container](#container) and
 export CLOUDFLARE_API_TOKEN=cf-token-with-zone-read-and-dns-read
 ./bin/auditor audit --provider cloudflare -o csv > cf.csv
 
-# OCI (Phase 3): compartment recursion + Compute instances + Load Balancers
-# today; 15 other resource types stubbed.
+# OCI (Phase 3): compartment recursion + all resource types (compute,
+# networking, storage, object storage, databases, functions, container
+# instances, OKE, vaults, IAM).
 #   Auth chain (auto-detected): instance principal → resource principal
 #   → ~/.oci/config → OCI_* env vars
 ./bin/auditor audit --provider oci -o json                       # home region only
 ./bin/auditor audit --provider oci --oci-regions all -o csv      # every subscribed region
 ./bin/auditor audit --provider oci --oci-profile PROD            # named profile
+# Excel workbook, one worksheet per compartment:
+./bin/auditor audit --provider oci --oci-regions all \
+  -o xlsx --sheet-by tag:compartment_id --output-file oci-assets.xlsx
 
 # Kubernetes (Phase 4): every resource type the cluster exposes — built-ins
 # and CRDs — via dynamic discovery. No need to list "what to scan"; the

@@ -38,6 +38,7 @@ func newAuditCmd(s *cliState) *cobra.Command {
 			format := v.GetString("output")
 			outFile := v.GetString("output-file")
 			stream := v.GetBool("stream")
+			sheetBy := v.GetString("sheet-by")
 			timeout := v.GetDuration("timeout")
 			opts := providerOptions{
 				maxConcurrency:        v.GetInt("max-concurrency"),
@@ -49,9 +50,14 @@ func newAuditCmd(s *cliState) *cobra.Command {
 				kubeExcludeNamespaces: v.GetStringSlice("kube-exclude-namespaces"),
 			}
 
-			renderer, err := buildRenderer(format, stream)
+			renderer, err := buildRenderer(format, stream, sheetBy)
 			if err != nil {
 				return err
+			}
+
+			// xlsx is binary — refuse to spew it at an interactive terminal.
+			if strings.EqualFold(format, "xlsx") && (outFile == "" || outFile == "-") && isCharDevice(os.Stdout) {
+				return errors.New("xlsx is a binary format: pass --output-file <path>.xlsx (or redirect stdout to a file)")
 			}
 
 			w, closeOut, err := openOutput(outFile)
@@ -96,9 +102,11 @@ func newAuditCmd(s *cliState) *cobra.Command {
 
 	cmd.Flags().StringSlice("provider", nil,
 		`providers to run (e.g. oci,cloudflare,kubernetes; use "none" to run zero; default: all registered)`)
-	cmd.Flags().StringP("output", "o", "json", "output format: json|csv")
+	cmd.Flags().StringP("output", "o", "json", "output format: json|csv|xlsx")
 	cmd.Flags().String("output-file", "", "write output to this file instead of stdout")
 	cmd.Flags().Bool("stream", false, "with -o json, emit NDJSON (one object per line) instead of an array")
+	cmd.Flags().String("sheet-by", "provider",
+		"with -o xlsx, split assets across worksheets by: none|provider|type|region|account|tag:KEY (e.g. tag:compartment_id)")
 	cmd.Flags().Bool("include-raw", false, "include the full provider payload in each asset")
 	cmd.Flags().Int("max-concurrency", 5, "per-provider parallelism")
 	cmd.Flags().Duration("timeout", 10*time.Minute, "overall audit timeout")
@@ -116,7 +124,7 @@ func newAuditCmd(s *cliState) *cobra.Command {
 	return cmd
 }
 
-func buildRenderer(format string, stream bool) (output.Renderer, error) {
+func buildRenderer(format string, stream bool, sheetBy string) (output.Renderer, error) {
 	switch strings.ToLower(format) {
 	case "json":
 		return &output.JSON{Stream: stream}, nil
@@ -125,9 +133,28 @@ func buildRenderer(format string, stream bool) (output.Renderer, error) {
 			return nil, errors.New("--stream is only meaningful with -o json")
 		}
 		return &output.CSV{}, nil
+	case "xlsx":
+		if stream {
+			return nil, errors.New("--stream is only meaningful with -o json")
+		}
+		r := &output.XLSX{SheetBy: sheetBy}
+		if err := r.Validate(); err != nil {
+			return nil, err
+		}
+		return r, nil
 	default:
-		return nil, fmt.Errorf("unknown output format %q (supported: json, csv)", format)
+		return nil, fmt.Errorf("unknown output format %q (supported: json, csv, xlsx)", format)
 	}
+}
+
+// isCharDevice reports whether f is an interactive terminal (vs a pipe or
+// regular file) — used to avoid writing binary xlsx to a TTY.
+func isCharDevice(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 func openOutput(path string) (io.Writer, func(), error) {

@@ -6,7 +6,7 @@ permission set, and per-resource implementation status.
 | Provider     | Phase | Implementation status                                  |
 | ------------ | ----- | ------------------------------------------------------ |
 | Cloudflare   | 2     | Zones + DNS records implemented; 11 resource types stubbed |
-| OCI          | 3     | Compartments + regions + Compute + Load Balancers implemented; 15 resource types stubbed |
+| OCI          | 3     | **Complete** — compartments + regions + all resource types implemented (compute, networking, storage, object storage, databases, functions, container instances, OKE, vaults, IAM) |
 | Kubernetes   | 4     | **Universal** — dynamic-client + discovery lists every built-in resource type and every CRD with no per-resource code |
 
 ---
@@ -130,21 +130,22 @@ compartment so resources living at the root aren't skipped.
 | Compartments             | `oci.compartment`                | shipped  |
 | Compute instances        | `oci.compute.instance`           | shipped  |
 | Classic Load Balancers   | `oci.load_balancer`              | shipped  |
-| Block volumes            | `oci.block_volume`               | stub     |
-| Boot volumes             | `oci.boot_volume`                | stub     |
-| VCNs                     | `oci.vcn`                        | stub     |
-| Subnets                  | `oci.subnet`                     | stub     |
-| Object Storage buckets   | `oci.object_storage.bucket`      | stub     |
-| Autonomous Databases     | `oci.autonomous_db`              | stub     |
-| DB Systems               | `oci.db_system`                  | stub     |
-| Functions                | `oci.function`                   | stub     |
-| Container Instances      | `oci.container_instance`         | stub     |
-| OKE clusters             | `oci.oke_cluster`                | stub     |
-| Vaults                   | `oci.vault`                      | stub     |
-| IAM Policies             | `oci.iam.policy`                 | stub     |
-| IAM Users                | `oci.iam.user`                   | stub     |
-| IAM Groups               | `oci.iam.group`                  | stub     |
-| IAM Dynamic Groups       | `oci.iam.dynamic_group`          | stub     |
+| Block volumes            | `oci.block_volume`               | shipped  |
+| Boot volumes             | `oci.boot_volume`                | shipped  |
+| VCNs                     | `oci.vcn`                        | shipped  |
+| Subnets                  | `oci.subnet`                     | shipped  |
+| Object Storage buckets   | `oci.object_storage.bucket`      | shipped  |
+| Autonomous Databases     | `oci.autonomous_database`        | shipped  |
+| DB Systems               | `oci.db_system`                  | shipped  |
+| Functions applications   | `oci.functions.application`      | shipped  |
+| Functions                | `oci.functions.function`         | shipped  |
+| Container Instances      | `oci.container_instance`         | shipped  |
+| OKE clusters             | `oci.oke.cluster`                | shipped  |
+| Vaults                   | `oci.vault`                      | shipped  |
+| IAM Policies             | `oci.iam.policy`                 | shipped  |
+| IAM Users                | `oci.iam.user`                   | shipped  |
+| IAM Groups               | `oci.iam.group`                  | shipped  |
+| IAM Dynamic Groups       | `oci.iam.dynamic_group`          | shipped  |
 
 ---
 

@@ -111,7 +111,7 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 	if format == "" {
 		format = "json"
 	}
-	renderer, contentType, err := buildExportRenderer(format)
+	renderer, contentType, err := buildExportRenderer(format, strings.ToLower(r.URL.Query().Get("sheet_by")))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -148,7 +148,7 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func buildExportRenderer(format string) (output.Renderer, string, error) {
+func buildExportRenderer(format, sheetBy string) (output.Renderer, string, error) {
 	switch format {
 	case "json":
 		return &output.JSON{}, "application/json", nil
@@ -156,8 +156,17 @@ func buildExportRenderer(format string) (output.Renderer, string, error) {
 		return &output.JSON{Stream: true}, "application/x-ndjson", nil
 	case "csv":
 		return &output.CSV{}, "text/csv", nil
+	case "xlsx":
+		if sheetBy == "" {
+			sheetBy = "provider"
+		}
+		r := &output.XLSX{SheetBy: sheetBy}
+		if err := r.Validate(); err != nil {
+			return nil, "", err
+		}
+		return r, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", nil
 	default:
-		return nil, "", fmt.Errorf("unknown format %q (want json|ndjson|csv)", format)
+		return nil, "", fmt.Errorf("unknown format %q (want json|ndjson|csv|xlsx)", format)
 	}
 }
 

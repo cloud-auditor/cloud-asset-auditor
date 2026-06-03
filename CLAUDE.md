@@ -4,82 +4,197 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-**All phases are shipped.** Every phase from init-plan.md §3 plus the user-added Phase 10 (network topology) is done. Outstanding work is the stubbed resource types in each provider (11 Cloudflare, 15 OCI — Kubernetes is universal so has no stubs) and the interactive Cytoscape.js UI tab Phase 10 mentioned (skipped for the same vendor-JS reason Phase 5's Alpine.js was — render with `dot`/`mermaid` instead).
+**All 10 phases of [`init-plan.md`](./init-plan.md) shipped; the project is in maintenance / fill-in mode.** Outstanding work:
 
-Per-phase quick map (file → architectural concern):
+- 12 Cloudflare stub collectors in `internal/providers/cloudflare/stubs.go` (Rulesets is stubbed at both account and zone scope)
+- OCI: **all resource types implemented** — the former `stubs.go` is gone; collectors live in `network.go`, `storage.go`, `object_storage.go`, `database.go`, `functions.go`, `container_instances.go`, `oke.go`, `vaults.go`, `iam.go` alongside the original `compute.go` / `load_balancer.go`.
+- (Kubernetes is universal via dynamic-client + discovery — no stubs)
 
-- **Phase 1** — `internal/core/`, `internal/output/`, `internal/cli/`, `internal/config/`, `cmd/auditor/main.go`, `justfile`
-- **Phase 2** — `internal/providers/cloudflare/`
-- **Phase 3** — `internal/providers/oci/`
-- **Phase 4** — `internal/providers/kubernetes/`
-- **Phase 5** — `internal/server/` (Go) + `internal/server/web/` (embedded HTML/CSS/JS)
-- **Phase 6** — `deploy/docker/Dockerfile`, `.dockerignore`
-- **Phase 7** — `deploy/helm/cloud-asset-auditor/` (Chart.yaml + values.yaml + templates + examples + chart README)
-- **Phase 8** — `.github/workflows/{ci,release,docker}.yml`, `.github/actions/audit/action.yml`, `.golangci.yml`, `.goreleaser.yaml`, `.trivyignore`
-- **Phase 9** — `docs/{configuration,providers,extending}.md` (this file too)
-- **Phase 10** — `internal/core/edge.go`, `internal/topology/`, `internal/cli/topology.go`, `internal/server/topology.go`
+Each remaining Cloudflare stub is wired into its provider's `Collect` orchestrator; filling one in is one file's worth of work using `internal/providers/cloudflare/dns.go` or any OCI collector (e.g. `internal/providers/oci/network.go`) as a template.
 
-**Before doing anything substantive, read `init-plan.md` end-to-end.** It is the single source of truth for the layout, abstractions, and phase ordering. Do not invent architecture that contradicts it.
+Anything else substantial — read [`init-plan.md`](./init-plan.md) end-to-end first. It is still the single source of truth for layout, abstractions, and phase ordering. Document any deviation explicitly (see the **Deviations from the plan** section below).
 
-## Build / test / lint
+For user-facing dev workflow (PRs, commit conventions, issue reporting), defer to [`CONTRIBUTING.md`](./CONTRIBUTING.md). This file is *operational knowledge for the next Claude session*, not duplicated dev docs.
 
-The project uses **`just`** (not `make`) as the task runner. Standard recipes: `just build`, `just test`, `just test-update`, `just lint`, `just tidy`, `just run -- <args>`, `just smoke`. Run `just` with no args to list them. Prefer recipes over raw `go` commands so behavior stays consistent across machines and CI.
+## Where things live
 
-**SDK choice deviation from the plan:** Phase 2 uses `github.com/cloudflare/cloudflare-go/v4` (the current production generated SDK), not `v2` as init-plan.md §3 specifies — `v2` was an early-access generated SDK that's been superseded. The `v4` API uses `cloudflare.F(value)` to wrap required params and an `AutoPager` iterator pattern (`iter.Next()` / `iter.Current()` / `iter.Err()`).
+Each phase from the plan lives in one place:
 
-**Phase 5 frontend deviation:** init-plan.md specifies Alpine.js. The shipped UI is plain vanilla JS instead — keeps the binary self-contained without vendoring third-party JS, smaller payload, simpler review surface. Same feature set: SSE streaming, sort, filter, provider/type facets, CSV/JSON export, sticky header. Lives in `internal/server/web/` (the plan put `web/` at the repo root; embedded assets are conventionally placed inside the package that uses them in Go).
+| Phase | Concern | Files |
+| ----- | ------- | ----- |
+| 1 | Foundation | `internal/core/`, `internal/output/`, `internal/cli/`, `internal/config/`, `cmd/auditor/main.go`, `justfile` |
+| 2 | Cloudflare provider | `internal/providers/cloudflare/` |
+| 3 | OCI provider | `internal/providers/oci/` |
+| 4 | Kubernetes provider | `internal/providers/kubernetes/` |
+| 5 | Web UI + JSON/SSE API | `internal/server/` + `internal/server/web/` (embedded HTML/CSS/JS) |
+| 6 | Container image | `deploy/docker/Dockerfile`, `.dockerignore` |
+| 7 | Helm chart | `deploy/helm/cloud-asset-auditor/` |
+| 8 | CI / release | `.github/workflows/{ci,release,docker}.yml`, `.github/actions/audit/action.yml`, `.golangci.yml`, `.goreleaser.yaml`, `.trivyignore` |
+| 9 | Docs | `docs/{configuration,providers,extending}.md`, README, this file |
+| 10 | Topology graph | `internal/core/edge.go`, `internal/topology/`, `internal/cli/topology.go`, `internal/server/topology.go` |
 
-**Phase 10 UI deviation:** the plan called for an interactive Cytoscape.js Topology tab. Same vendor-JS reason as Phase 5 — instead, the topology ships as a CLI subcommand + JSON API endpoint with four renderers (JSON / DOT / Mermaid / **Excalidraw**). The Excalidraw export is the closest practical "editable canvas" experience without vendoring a JS framework: pipe `auditor topology -o excalidraw > topology.excalidraw`, drop the file into `excalidraw.com` or the desktop app, and you get a hand-drawn diagram you can rearrange — arrows stay bound to their nodes. Resolvers parse K8s `Ingress` / `HTTPRoute` / `Service` payloads (`--include-raw` is forced on by the subcommand). The JSON endpoint at `/api/v1/topology` returns `{nodes, edges}`; `?format=dot|mermaid|excalidraw` makes it stream the renderer's output back as a download.
+Four cross-cutting subsystems were added **after** the plan (issues #2–#4) and belong to no phase: `internal/logging/` (slog), `internal/telemetry/` (OpenTelemetry tracing), `internal/metrics/` (Prometheus), and `internal/version/` (ldflags-injected `Version`/`Commit`/`Date`, surfaced by `auditor version`). The first three are detailed under **Observability** in the Architecture section below.
 
-**Phase 6 image size deviation:** init-plan.md §3 Phase 6 calls for `< 30 MB`. Actual size is ~75 MB. The Cloudflare v4 generated SDK, the OCI v65 SDK (70+ service packages), and k8s client-go + apimachinery push the static binary alone to ~73 MB before distroless adds ~2 MB. Hitting <30 MB would require either ripping out provider SDKs (defeating the point) or a build-tag pruning scheme that doesn't exist upstream. Documented in the Dockerfile comments; revisit if a smaller image becomes a hard requirement.
+The three top-level CLI command shapes:
 
-## Architecture (from `init-plan.md`)
+- `auditor audit` — runs providers, streams `Asset`s to `internal/output` renderers (JSON / CSV / XLSX). XLSX adds `--sheet-by` (none|provider|type|region|account|tag:KEY) to split assets across worksheets — e.g. `--sheet-by tag:compartment_id` for one sheet per OCI compartment.
+- `auditor serve` — embedded SPA + `/api/v1/{providers,audit,audit/export,topology,openapi.yaml}` with optional basic/token auth, plus always-open infra endpoints `/healthz` and `/metrics` (Prometheus) that sit **outside** the `/api/v1` namespace.
+- `auditor topology` — runs an audit, builds a derived `Topology = {Nodes, Edges}` via `internal/topology` resolvers, renders to JSON / DOT / Mermaid / **Excalidraw**.
 
-The plan is Go-first (see §0 for the rationale; Python is an explicit fallback with a one-to-one substitution list). The design rests on three contracts that must be implemented in Phase 1 **before** any provider code:
+## Architecture (from `init-plan.md` §2)
 
-- **`core.Asset`** — canonical, intentionally minimal struct. Provider-specific richness lives in the opt-in `Raw json.RawMessage` field, not as new top-level fields. Resist the urge to extend this struct.
-- **`core.Provider`** — `Validate(ctx)` + `Collect(ctx) (<-chan Asset, <-chan error)`. Channels are mandatory, not optional: streaming keeps memory bounded against large K8s clusters (50k+ objects) and lets the UI render rows as they arrive.
-- **`output.Renderer`** — consumes the asset channel and writes to an `io.Writer`. JSON (array or NDJSON via `--stream`) and CSV (flattens `Tags` into one column).
+The design rests on three small contracts. **Don't extend them without good reason** — every provider, renderer, and topology resolver depends on their shape.
 
-Providers register themselves into a `registry` map (via package `init()`) so the CLI can enumerate and select them by name (`--provider oci,cloudflare`). New providers are wired into the binary by adding a blank import to `cmd/auditor/main.go` — that's the only place new providers need to be touched outside their own package.
+- **`core.Asset`** — the canonical, intentionally minimal struct. Provider-specific richness lives in opt-in `Raw json.RawMessage` (gated on `--include-raw`). Resist adding new top-level fields.
+- **`core.Provider`** — `Name()` + `Validate(ctx)` + `Collect(ctx) (<-chan Asset, <-chan error)`. Channels are mandatory: streaming keeps memory bounded against large K8s clusters (50k+ objects) and lets the UI render rows as they arrive. Both channels MUST close exactly once; errors are non-fatal (push to `errs` and keep going).
+- **`output.Renderer`** — consumes the asset channel and writes to an `io.Writer`. JSON (array or NDJSON via `--stream`), CSV (flattens `Tags` into one column), and XLSX (`internal/output/xlsx.go`, via `github.com/xuri/excelize/v2`). XLSX is the **one renderer that buffers the whole stream** — an `.xlsx` is a ZIP finalized at close, and sheets/columns aren't known until every asset is seen. It partitions assets into worksheets by `SheetBy`, expands `Tags` into one column per key (per-sheet union), resolves group values that match an asset ID to that asset's Name (so `tag:compartment_id` → compartment names), and co-locates a "container" asset (the compartment itself) into its children's sheet.
 
-**Optional Configurable interfaces** on the provider side let the CLI push knob values without changing the base contract. Each is type-asserted in `internal/cli/audit.go::applyProviderOptions` and skipped silently when not implemented:
+Providers register themselves into a `registry` map (via package `init()`). New providers are wired into the binary by adding a blank import to `cmd/auditor/main.go` — the only outside touch point.
 
-- `core.ConcurrencyConfigurable` — `SetMaxConcurrency(int)`; receives `--max-concurrency`.
-- `core.IncludeRawConfigurable` — `SetIncludeRaw(bool)`; receives `--include-raw`.
-- `core.ProfileConfigurable` — `SetProfile(string)`; receives `--oci-profile`.
-- `core.RegionsConfigurable` — `SetRegions([]string)`; receives `--oci-regions`.
-- `core.KubeConfigurable` — bundled `SetKubeContext` / `SetKubeNamespace` / `SetKubeExcludeNamespaces`; receives `--kube-context`, `--kube-namespace`, `--kube-exclude-namespaces` (they're always applied together so one interface suffices).
+**Optional Configurable interfaces** in `internal/core/provider.go` let the CLI push knob values without changing the base contract. Each is type-asserted in `internal/cli/audit.go::applyProviderOptions` and silently skipped when not implemented:
 
-When adding a new CLI flag that needs to reach providers, extend `providerOptions` and `applyProviderOptions`, declare a new Configurable interface in `internal/core/provider.go`, and implement it on the provider(s) that care.
+| Interface                    | Method                                                          | Flag                                                                       |
+| ---------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `ConcurrencyConfigurable`    | `SetMaxConcurrency(int)`                                        | `--max-concurrency`                                                        |
+| `IncludeRawConfigurable`     | `SetIncludeRaw(bool)`                                           | `--include-raw`                                                            |
+| `ProfileConfigurable`        | `SetProfile(string)`                                            | `--oci-profile`                                                            |
+| `RegionsConfigurable`        | `SetRegions([]string)`                                          | `--oci-regions` (the `"all"` sentinel is the provider's responsibility)    |
+| `KubeConfigurable`           | `SetKubeContext/Namespace/ExcludeNamespaces`                    | `--kube-context`, `--kube-namespace`, `--kube-exclude-namespaces`          |
 
-### Provider-specific gotchas baked into the plan
+When adding a new CLI flag that needs to reach providers, extend `providerOptions` + `applyProviderOptions`, declare a Configurable interface in `internal/core/provider.go`, and implement it on the provider(s) that care.
 
-- **OCI**: must recurse compartments from the tenancy root — the most common omission, handled in `internal/providers/oci/compartments.go` via the SDK's `CompartmentIdInSubtree=true` flag. Auth chain (implemented in `auth.go`): instance principal (gated by a 250 ms IMDS probe so laptops don't pay the cost) → resource principal (gated by `OCI_RESOURCE_PRINCIPAL_VERSION` env) → config file (~/.oci/config, profile from `--oci-profile`) → env vars (`OCI_*` prefix). Resource fan-out is per (region × compartment × resource type); tenancy-global resources (Policies / Users / Groups / DynamicGroups) run once outside the loop.
-- **Kubernetes**: uses the **dynamic client + discovery** (`ServerPreferredResources` → `dynamicClient.Resource(gvr).List`), not typed clients. This is what makes CRDs come along for free. Implementation lives in `internal/providers/kubernetes/`. The filtering logic (`filterResources` in `discover.go`) drops subresources (names containing `/`) and anything whose verb list doesn't include `list`. Per-GVR Forbidden / MethodNotSupported errors are swallowed silently — they mean the SA can't see that resource type, which is a permission gap, not a fault. `ServerPreferredResources` partial errors (`*discovery.ErrGroupDiscoveryFailed`) are treated as warnings so a downed aggregated API doesn't kill the whole audit. Auth: in-cluster (when `KUBERNETES_SERVICE_HOST` is set) or kubeconfig (`KUBECONFIG` env, then `~/.kube/config`), with `--kube-context` to override the current-context.
-- **Cloudflare**: token-only auth (`CLOUDFLARE_API_TOKEN`), no legacy email+key path. Fan out resource enumerations under an `errgroup` capped by `--max-concurrency` (default 5).
+### Per-provider gotchas
 
-### Cross-cutting invariants (§6 of the plan — "cheap now, expensive later")
+- **OCI** — Must recurse compartments from the tenancy root (the canonical OCI mistake). Handled in `internal/providers/oci/compartments.go` via the SDK's `CompartmentIdInSubtree=true`. Auth chain (`auth.go`): instance principal (gated by a 250 ms IMDS probe so laptops don't pay the cost) → resource principal (gated by `OCI_RESOURCE_PRINCIPAL_VERSION` env) → config file → env vars. Resource fan-out is per (region × compartment × resource type). **Policies** are region-independent but compartment-scoped, so they run once per compartment outside the region loop (`iam.go`); **Users / Groups / DynamicGroups** are tenancy-root-only and run exactly once. Two collector-specific notes: Object Storage's namespace is resolved once via a `sync.Once` cache on the Provider (`object_storage.go::objectStorageNamespace`) and shared across every bucket collector; block/boot volume listing omits `AvailabilityDomain` (optional in oci-go-sdk v65 — confirmed working against the live API), so one per-compartment call covers all ADs.
+- **Kubernetes** — Dynamic client + discovery (`ServerPreferredResources` → `dynamicClient.Resource(gvr).List`), **not** typed clients. That's what makes CRDs come along for free. `internal/providers/kubernetes/discover.go::filterResources` drops subresources (names containing `/`) and anything whose verb list doesn't include `list`. Per-GVR `Forbidden` / `MethodNotSupported` errors are swallowed silently — they mean the SA can't read that type, which is a permission gap, not a bug. `*discovery.ErrGroupDiscoveryFailed` (a downed aggregated API server) is treated as a warning.
+- **Cloudflare** — Token-only auth (`CLOUDFLARE_API_TOKEN`); no legacy email+key path. `errgroup` capped by `--max-concurrency` (default 5) fans out per-zone and account-scoped collectors.
 
-These apply to every phase and every PR:
+### Topology resolvers (Phase 10)
 
-1. **Stream end-to-end.** Never buffer the full asset list.
-2. **Plumb `context.Context` through every SDK call.** Ctrl+C must stop work in <1s.
+`internal/topology/Build([]Asset)` runs four pluggable resolvers over a shared `index` (assets keyed by ID / Type / IP / hostname):
+
+- `dnsToTarget` — DNS records → matched LB/Service by IP or CNAME. **Heuristic** confidence (cross-cloud join).
+- `lbToGateway` — OCI LB IPs → K8s Service external IPs. **Heuristic**.
+- `gatewayToService` — K8s Ingress / HTTPRoute spec → backing Service. **Exact**. Requires `Asset.Raw` (the topology CLI forces `--include-raw=true`).
+- `wafBinding` — CF Rulesets/Access/Tunnels → protected zone. **Exact** (but emits zero edges today because the CF security stubs aren't implemented).
+
+Renderer outputs are **deterministic** (sorted nodes/edges, FNV-hashed Excalidraw element IDs) so two runs of the same topology produce byte-identical files. Tests assert this for Excalidraw.
+
+### Cross-cutting invariants (`init-plan.md §6`)
+
+Apply to every commit, every provider, every renderer:
+
+1. **Stream end-to-end.** Never buffer the full asset list. (Sole documented exception: the XLSX renderer, which *must* buffer — an `.xlsx` ZIP is finalized at close and its sheets/columns depend on the full set. JSON/CSV stay streaming.)
+2. **Plumb `context.Context` through every SDK call.** Ctrl+C must stop work in <1 s.
 3. **`log/slog` to stderr only.** stdout is reserved for renderer output when `--output-file` is unset.
 4. **Never log secrets.** Use a redaction helper at every error-wrapping site.
-5. **Partial failure is normal.** If OCI times out, still emit Cloudflare results with an `errors` section and a distinct non-zero exit code (e.g. 2). Don't abort the whole run on one provider's failure.
+5. **Partial failure is normal.** If OCI times out, still emit Cloudflare results; map "some assets, some errors" to exit code 2.
 6. **Version the web API.** `/api/v1/audit`, not `/api/audit`.
 
-## Phase ordering
+### Observability (post-plan: logging / tracing / metrics / OpenAPI)
 
-The plan is structured so each phase is independently shippable. **Do not jump ahead.** Phase 1 (foundation, no providers) must produce a working `auditor audit --provider none -o json` returning `[]` before any provider is touched. Cloudflare is Phase 2 (simplest auth), OCI is Phase 3, Kubernetes is Phase 4. Web UI is Phase 5. Docker/Helm/CI/docs are Phases 6–9 — after Phase 5 the tool is already useful.
+Added after the plan (issues #2–#4). Logging + tracing are installed in `internal/cli/root.go::PersistentPreRunE`; metrics + the OpenAPI spec are served from `internal/server/server.go::routes`. Three **persistent root flags** drive them — `--log-level`, `--log-format`, `--tracing` — all viper-bound, so `AUDITOR_LOG_LEVEL` / `AUDITOR_LOG_FORMAT` / `AUDITOR_TRACING` env vars and config-file keys work too.
 
-When the user requests work, default to executing one phase at a time per §7 of the plan, not the whole document at once.
+- **Logging** (`internal/logging/`) — structured `slog`, installed as the process default at startup so package-level `slog.*` calls and injected loggers share one config. `--log-level` (debug|info|warn|error, default info; an invalid level **fails startup**), `--log-format` (text|json, default text; an unknown format **silently falls back to text**). stderr only (invariant 3).
+- **Tracing** (`internal/telemetry/`) — OpenTelemetry, opt-in `--tracing` (off|stdout|otlp, **default off** = noop provider, zero overhead). `stdout` mode writes spans to **stderr**, not stdout (stdout is renderer-reserved). `otlp` endpoint precedence: explicit flag → `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` → `OTEL_EXPORTER_OTLP_ENDPOINT`. Audits (CLI and server) emit a parent `audit` span with child `provider.collect` spans; the server also wraps every handler in `otelhttp` (filtering `/healthz`). `Setup()` is idempotent; `Shutdown()` is flushed on CLI exit (5 s) and server shutdown (10 s).
+- **Metrics** (`internal/metrics/`) — Prometheus on a **project-scoped registry** (not the global default; only `process_*`/`go_*` are pulled in). Served at **`GET /metrics`**, always open and **auth-exempt** (scraper semantics, like `/healthz`). No flags. Recorded during collect in both `internal/cli/audit.go::forward` and `internal/server/audit.go::forward`: `auditor_assets_collected_total{provider,type}`, `auditor_audit_errors_total{provider}`, `auditor_audit_duration_seconds{provider}` (histogram, 0.1 s–600 s buckets), and `auditor_server_sse_clients` (gauge, web-UI only). Helm `ServiceMonitor` is opt-in (`mode=deployment` + `monitoring.serviceMonitor.enabled`, default off).
+- **OpenAPI** (`internal/server/openapi.yaml`) — OpenAPI 3.1 spec, `//go:embed`-ed (`embed.go`) and served verbatim at **`GET /api/v1/openapi.yaml`** — the only `/api/*` path that is **auth-exempt**. **Hand-maintained:** keep it in sync with `routes()` when you add/change an endpoint. `TestOpenAPI_EveryDocumentedPathHasAHandler` enforces documented→handler, but **not** the reverse (a new handler missing from the spec won't fail CI).
 
-## Testing strategy (§5)
+## Common operations
 
-- Unit tests mock the SDK clients — no real API calls in unit tests.
-- Integration tests live behind `//go:build integration` and run nightly against a sandbox tenancy, not on every PR.
-- Renderers use **golden files** — feed a fixed `[]Asset`, assert output byte-for-byte.
-- Kubernetes tests use `envtest` (controller-runtime's local apiserver), not kind, for speed.
-- Coverage target: ≥70% on `internal/core` and `internal/output`. Provider packages will be lower because most code is SDK glue.
+Project uses **`just`** (not `make`). Run `just` with no args to list every recipe.
+
+| Recipe                          | What it does                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------- |
+| `just build`                    | Builds `./bin/auditor` with ldflags-injected version/commit/date              |
+| `just test`                     | `go test -race -cover ./...`                                                  |
+| `just test-update`              | Regenerates renderer golden files                                             |
+| `just lint`                     | `golangci-lint run` (requires v2.x — see below)                               |
+| `just tidy`                     | `go mod tidy` (regenerates go.sum)                                            |
+| `just smoke`                    | Build + verify Phase 1 exit criterion (`audit --provider none -o json == []`) |
+| `just docker` / `just docker-run` | Container build + run                                                       |
+| `just helm-lint` / `just helm-template` | Helm chart validation                                                 |
+
+Run a single test: `go test -run TestBuild_LBToK8sService ./internal/topology/...`
+
+### Linting locally
+
+The `golangci/golangci-lint-action@v6 with version: latest` action resolves to the **v1.x** line, which was built with Go 1.24 and refuses to lint code targeting Go 1.26+ (CI hit this; commit `650d572`). The fix — installed automatically by `ci.yml` and what you should do locally — is to build v2 from source against the project toolchain:
+
+```bash
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+golangci-lint run ./...
+```
+
+Config in [`.golangci.yml`](./.golangci.yml) uses the **v2 schema** (`version: "2"`, `linters.default: none`, formatters split into their own block). Don't migrate it back to v1.
+
+## Don't repeat these mistakes
+
+Things that broke at some point and have lasting "don't undo this" notes — preserve them.
+
+1. **Do not call `viper.SetConfigType("yaml")` in `internal/config/config.go`.** Viper's `searchInPath` has a special branch when `configType` is set: it also matches the **extensionless** filename. CI builds the binary as `./auditor` in the workspace root, which then matches; viper tries to parse the ELF bytes as YAML and explodes ("yaml: control characters are not allowed"). Caught in commit `be5350f`; regression test in `internal/config/config_test.go::TestInit_IgnoresExtensionlessAuditorFile`.
+2. **Do not pin `golangci-lint-action@v6 latest`** in CI — see Linting section above. Use `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest` instead.
+3. **Do not pin `cloudflare-go/v2`** (despite what `init-plan.md §3` Phase 2 says). It's been superseded by `v4`. The v4 API uses `cloudflare.F(value)` to wrap required params and `AutoPager` for iteration.
+4. **Do not vendor Cytoscape.js / Alpine.js / any third-party JS** into `internal/server/web/`. The Phase 5 + Phase 10 deviations are deliberate: keep the binary fully self-contained. The Topology page uses DOT/Mermaid/Excalidraw exports instead of an in-browser graph view.
+5. **Do not add new top-level fields to `core.Asset`.** Put provider-specific richness in `Asset.Raw` (opt-in via `--include-raw`). Adding fields breaks the renderer's golden files and the JSON API contract.
+6. **Do not re-pin the Trivy GitHub Action in `docker.yml`.** Trivy is installed from its upstream `install.sh` script on purpose (commit `abebd60`) — a pinned marketplace action drifts out of sync with the Go toolchain the same way `golangci-lint-action` and the gosec image did (mistakes 2 above).
+7. **Keep `internal/server/openapi.yaml` in sync with `routes()`.** The spec is hand-maintained; `TestOpenAPI_EveryDocumentedPathHasAHandler` only checks documented→handler, so a newly added handler that you forget to document will pass CI but leave the spec lying. And don't auth-gate `/metrics`, `/healthz`, or `/api/v1/openapi.yaml` — they're deliberately exempt.
+
+## Deviations from the plan
+
+Each was a deliberate choice; the rationale matters when revisiting:
+
+- **Phase 2 SDK**: `cloudflare-go/v4` instead of plan's `v2` (`v2` was an early-access generated SDK that's been superseded).
+- **Phase 5 frontend**: vanilla JS, not Alpine.js (self-contained binary; smaller payload; simpler review surface). Same feature set: SSE streaming, sort, filter, provider/type facets, CSV/JSON export, sticky header. Lives in `internal/server/web/` (plan put `web/` at the repo root; embedded assets are conventionally placed inside the package that uses them in Go).
+- **Phase 6 image size**: ~75 MB, not the plan's `<30 MB` target. Cloudflare v4 + OCI v65 (70+ service packages) + k8s client-go push the static binary to ~73 MB before distroless adds ~2 MB. Hitting <30 MB would require ripping out provider SDKs or a build-tag pruning scheme that doesn't exist upstream.
+- **Phase 10 UI**: no interactive Cytoscape.js tab; instead, CLI + JSON API with four renderers (JSON / DOT / Mermaid / Excalidraw). The Excalidraw export is the practical "editable canvas" — pipe `auditor topology -o excalidraw > topology.excalidraw`, drop into excalidraw.com or the desktop app, edit by hand. Arrows are bound to nodes so rearranging keeps them attached.
+
+## Testing strategy
+
+What's actually in the repo today (different from init-plan.md §5's targets):
+
+- **Pure mapping tests** per provider — `*ToAsset` functions tested with synthetic SDK structs. No SDK client mocking yet.
+- **Renderer golden files** in `internal/output/testdata/` for JSON array, JSON stream (NDJSON), CSV. Regenerate with `just test-update`.
+- **Topology resolvers** tested against a canonical synthetic chain (CF DNS → OCI LB → K8s Service + Ingress) in `internal/topology/topology_test.go`. No SDK mocks needed — pure asset literals.
+- **Server tests** use `httptest.NewServer` with the real handler chain; SSE wire format parsed by a small in-test reader.
+- **Config tests** use `t.Chdir` + `t.Setenv` to isolate the working directory and `$HOME`; they're how the viper bare-filename regression is defended against.
+
+What's missing (open work for future PRs):
+
+- **Integration tests behind `//go:build integration`** were spec'd in §5 but not yet implemented. A nightly workflow against a sandbox tenancy is the right shape.
+- **`envtest`-based Kubernetes tests** were planned but not added; the `dynamic/fake.NewSimpleDynamicClientWithCustomListKinds` we use today covers the list-path adequately.
+
+Coverage snapshot (from latest `just test`):
+
+| Package                              | Coverage |
+| ------------------------------------ | -------- |
+| `internal/logging`                   | ~95%     |
+| `internal/core`                      | ~94%     |
+| `internal/config`                    | ~93%     |
+| `internal/topology`                  | ~89%     |
+| `internal/output`                    | ~82%     |
+| `internal/telemetry`                 | ~78%     |
+| `internal/metrics`                   | ~75%     |
+| `internal/server`                    | ~63%     |
+| `internal/providers/kubernetes`      | ~47%     |
+| `internal/providers/oci`             | ~19%     |
+| `internal/providers/cloudflare`      | ~20%     |
+| `internal/version`                   | 0% (ldflags only, no tests) |
+
+Provider coverage is intentionally lower because most of the code is SDK glue; the mapping bits are well-covered, the network bits wait for integration tests.
+
+## CI gates
+
+CI runs five jobs on every PR — `ci.yml`:
+
+1. **test** — `go test -race -cover ./...`
+2. **lint** — `golangci-lint run` (v2, installed from source — see above)
+3. **security** — `gosec` (pinned `v2.21.4`)
+4. **helm** — `helm lint` in both example-values modes + `helm template`
+5. **smoke** — build + `auditor --help`, `version`, `providers`, and the Phase 1 exit-criterion `audit --provider none -o json == []`
+
+Release flow:
+
+- Push a `v*` tag → `release.yml` runs `goreleaser` (cross-builds, cosign keyless, SBOM, GitHub Release).
+- Push to `main` + tags → `docker.yml` builds multi-arch (`linux/amd64`, `linux/arm64`), pushes to GHCR, cosign-signs each tag by digest, then runs a Trivy scan with a HIGH/CRITICAL gate (Trivy installed from upstream `install.sh`, not a pinned action — see mistake 6).
+- The reusable composite at `.github/actions/audit/action.yml` lets other repos run the auditor in one step.
