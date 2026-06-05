@@ -79,6 +79,9 @@ func (p *Provider) run(ctx context.Context, assets chan<- core.Asset, errs chan<
 			collect("load-balancers "+tag, func(ctx context.Context) error {
 				return p.collectLoadBalancers(ctx, region, cOCID, assets)
 			})
+			collect("network-load-balancers "+tag, func(ctx context.Context) error {
+				return p.collectNetworkLoadBalancers(ctx, region, cOCID, assets)
+			})
 			collect("block-volumes "+tag, func(ctx context.Context) error {
 				return p.collectBlockVolumes(ctx, region, cOCID, assets)
 			})
@@ -90,6 +93,21 @@ func (p *Provider) run(ctx context.Context, assets chan<- core.Asset, errs chan<
 			})
 			collect("subnets "+tag, func(ctx context.Context) error {
 				return p.collectSubnets(ctx, region, cOCID, assets)
+			})
+			collect("nat-gateways "+tag, func(ctx context.Context) error {
+				return p.collectNATGateways(ctx, region, cOCID, assets)
+			})
+			collect("internet-gateways "+tag, func(ctx context.Context) error {
+				return p.collectInternetGateways(ctx, region, cOCID, assets)
+			})
+			collect("service-gateways "+tag, func(ctx context.Context) error {
+				return p.collectServiceGateways(ctx, region, cOCID, assets)
+			})
+			collect("local-peering-gateways "+tag, func(ctx context.Context) error {
+				return p.collectLocalPeeringGateways(ctx, region, cOCID, assets)
+			})
+			collect("drgs "+tag, func(ctx context.Context) error {
+				return p.collectDRGs(ctx, region, cOCID, assets)
 			})
 			collect("object-storage "+tag, func(ctx context.Context) error {
 				return p.collectObjectStorageBuckets(ctx, region, cOCID, assets)

@@ -58,6 +58,80 @@ func TestSetters(t *testing.T) {
 	if len(p.cfg.KubeExcludeNamespaces) != 1 {
 		t.Errorf("nil should not clobber; got %v", p.cfg.KubeExcludeNamespaces)
 	}
+
+	p.SetKubeExcludeHelmSecrets(true)
+	if !p.cfg.ExcludeHelmSecrets {
+		t.Error("ExcludeHelmSecrets not set")
+	}
+}
+
+func TestIsHelmReleaseSecret(t *testing.T) {
+	secret := func(name, typ string) *unstructured.Unstructured {
+		o := map[string]any{"apiVersion": "v1", "kind": "Secret",
+			"metadata": map[string]any{"name": name}}
+		if typ != "" {
+			o["type"] = typ
+		}
+		return &unstructured.Unstructured{Object: o}
+	}
+	cases := []struct {
+		name string
+		u    *unstructured.Unstructured
+		want bool
+	}{
+		{"helm by type", secret("sh.helm.release.v1.argocd.v3", "helm.sh/release.v1"), true},
+		{"helm by name only", secret("sh.helm.release.v1.loki.v2", ""), true},
+		{"opaque secret", secret("argocd-secret", "Opaque"), false},
+		{"tls secret", secret("argocd-tls", "kubernetes.io/tls"), false},
+		{"non-secret named like helm", &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1", "kind": "ConfigMap",
+			"metadata": map[string]any{"name": "sh.helm.release.v1.x.v1"}}}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isHelmReleaseSecret(c.u); got != c.want {
+				t.Errorf("isHelmReleaseSecret = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestListResource_ExcludesHelmSecrets(t *testing.T) {
+	gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	secret := func(name, typ string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"type":       typ,
+			"metadata":   map[string]any{"name": name, "namespace": "argocd", "uid": name + "-uid"},
+		}}
+	}
+	scheme := runtime.NewScheme()
+	listKinds := map[schema.GroupVersionResource]string{gvr: "SecretList"}
+	objs := []runtime.Object{
+		secret("sh.helm.release.v1.argocd.v1", "helm.sh/release.v1"),
+		secret("argocd-secret", "Opaque"),
+	}
+	dynClient := dynfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds, objs...)
+
+	p := &Provider{dynamic: dynClient, clusterID: "test", cfg: Config{ExcludeHelmSecrets: true}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	out := make(chan core.Asset, 16)
+	if err := p.listResource(ctx, resourceTarget{GVR: gvr, Namespaced: true, Kind: "Secret"}, out); err != nil {
+		t.Fatal(err)
+	}
+	close(out)
+
+	var names []string
+	for a := range out {
+		names = append(names, a.Name)
+	}
+	if len(names) != 1 || names[0] != "argocd-secret" {
+		t.Fatalf("got %v, want [argocd-secret] (helm release secret excluded)", names)
+	}
 }
 
 func TestFormatType(t *testing.T) {

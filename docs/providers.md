@@ -106,13 +106,15 @@ Allow group Inventory-Auditors to read all-resources in tenancy
 
 ### Regions
 
-Default: home region of the configured tenancy. To scan all regions
-the tenancy is subscribed to:
+Default: **every region the tenancy is subscribed to**. If the subscription
+lookup fails (e.g. a missing identity permission), the audit falls back to the
+tenancy's home region rather than aborting. To narrow the scan to specific
+regions:
 
 ```bash
-auditor audit --provider oci --oci-regions all
-# or pick specific regions:
 auditor audit --provider oci --oci-regions us-ashburn-1,us-phoenix-1
+# "all" is the explicit form of the default:
+auditor audit --provider oci --oci-regions all
 ```
 
 ### Compartment recursion

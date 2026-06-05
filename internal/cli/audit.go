@@ -39,18 +39,20 @@ func newAuditCmd(s *cliState) *cobra.Command {
 			outFile := v.GetString("output-file")
 			stream := v.GetBool("stream")
 			sheetBy := v.GetString("sheet-by")
+			summary := v.GetBool("summary")
 			timeout := v.GetDuration("timeout")
 			opts := providerOptions{
-				maxConcurrency:        v.GetInt("max-concurrency"),
-				includeRaw:            v.GetBool("include-raw"),
-				ociProfile:            v.GetString("oci-profile"),
-				ociRegions:            v.GetStringSlice("oci-regions"),
-				kubeContext:           v.GetString("kube-context"),
-				kubeNamespace:         v.GetString("kube-namespace"),
-				kubeExcludeNamespaces: v.GetStringSlice("kube-exclude-namespaces"),
+				maxConcurrency:         v.GetInt("max-concurrency"),
+				includeRaw:             v.GetBool("include-raw"),
+				ociProfile:             v.GetString("oci-profile"),
+				ociRegions:             v.GetStringSlice("oci-regions"),
+				kubeContext:            v.GetString("kube-context"),
+				kubeNamespace:          v.GetString("kube-namespace"),
+				kubeExcludeNamespaces:  v.GetStringSlice("kube-exclude-namespaces"),
+				kubeExcludeHelmSecrets: v.GetBool("kube-exclude-helm-secrets"),
 			}
 
-			renderer, err := buildRenderer(format, stream, sheetBy)
+			renderer, err := buildRenderer(format, stream, sheetBy, summary)
 			if err != nil {
 				return err
 			}
@@ -106,7 +108,8 @@ func newAuditCmd(s *cliState) *cobra.Command {
 	cmd.Flags().String("output-file", "", "write output to this file instead of stdout")
 	cmd.Flags().Bool("stream", false, "with -o json, emit NDJSON (one object per line) instead of an array")
 	cmd.Flags().String("sheet-by", "provider",
-		"with -o xlsx, split assets across worksheets by: none|provider|type|region|account|tag:KEY (e.g. tag:compartment_id)")
+		"with -o xlsx, split worksheets by one or more '+'-joined dimensions: none|provider|type|region|account|tag:KEY (e.g. tag:compartment_id, or region+tag:compartment_id for a sheet per region/compartment)")
+	cmd.Flags().Bool("summary", false, "with -o xlsx, prepend a Summary worksheet (totals + per-sheet and per-type counts, linked to each sheet)")
 	cmd.Flags().Bool("include-raw", false, "include the full provider payload in each asset")
 	cmd.Flags().Int("max-concurrency", 5, "per-provider parallelism")
 	cmd.Flags().Duration("timeout", 10*time.Minute, "overall audit timeout")
@@ -114,17 +117,19 @@ func newAuditCmd(s *cliState) *cobra.Command {
 	// Provider-scoped flags — declared from day one so the surface area in
 	// init-plan.md §4 is stable. Wired to real behavior in Phases 2–4.
 	cmd.Flags().String("oci-profile", "", "OCI config profile name")
-	cmd.Flags().StringSlice("oci-regions", nil, `OCI regions to scan, or "all" for every subscribed region`)
+	cmd.Flags().StringSlice("oci-regions", nil, `OCI regions to scan (default: every subscribed region); pass a comma-separated list to narrow`)
 	cmd.Flags().String("kube-context", "", "kubeconfig context name")
 	cmd.Flags().String("kube-namespace", "", "limit Kubernetes audit to a single namespace")
 	cmd.Flags().StringSlice("kube-exclude-namespaces",
 		[]string{"kube-system", "kube-public", "kube-node-lease"},
 		"Kubernetes namespaces to skip")
+	cmd.Flags().Bool("kube-exclude-helm-secrets", false,
+		"skip Helm v3 release-state Secrets (type helm.sh/release.v1)")
 
 	return cmd
 }
 
-func buildRenderer(format string, stream bool, sheetBy string) (output.Renderer, error) {
+func buildRenderer(format string, stream bool, sheetBy string, summary bool) (output.Renderer, error) {
 	switch strings.ToLower(format) {
 	case "json":
 		return &output.JSON{Stream: stream}, nil
@@ -137,7 +142,7 @@ func buildRenderer(format string, stream bool, sheetBy string) (output.Renderer,
 		if stream {
 			return nil, errors.New("--stream is only meaningful with -o json")
 		}
-		r := &output.XLSX{SheetBy: sheetBy}
+		r := &output.XLSX{SheetBy: sheetBy, Summary: summary}
 		if err := r.Validate(); err != nil {
 			return nil, err
 		}
@@ -175,13 +180,14 @@ func openOutput(path string) (io.Writer, func(), error) {
 // providerOptions bundles every CLI-derived knob the audit command pushes
 // down to providers. Adding a new flag here is the right place to wire it.
 type providerOptions struct {
-	maxConcurrency        int
-	includeRaw            bool
-	ociProfile            string
-	ociRegions            []string
-	kubeContext           string
-	kubeNamespace         string
-	kubeExcludeNamespaces []string
+	maxConcurrency         int
+	includeRaw             bool
+	ociProfile             string
+	ociRegions             []string
+	kubeContext            string
+	kubeNamespace          string
+	kubeExcludeNamespaces  []string
+	kubeExcludeHelmSecrets bool
 }
 
 // applyProviderOptions type-asserts each provider against the optional
@@ -206,6 +212,7 @@ func applyProviderOptions(providers []core.Provider, opts providerOptions) {
 			c.SetKubeContext(opts.kubeContext)
 			c.SetKubeNamespace(opts.kubeNamespace)
 			c.SetKubeExcludeNamespaces(opts.kubeExcludeNamespaces)
+			c.SetKubeExcludeHelmSecrets(opts.kubeExcludeHelmSecrets)
 		}
 	}
 }

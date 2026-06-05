@@ -121,7 +121,7 @@ Examples:
 	// Provider-scoped flags mirrored from `audit` so a single invocation
 	// can target the same cluster / tenancy / profile.
 	cmd.Flags().String("oci-profile", "", "OCI config profile name")
-	cmd.Flags().StringSlice("oci-regions", nil, `OCI regions to scan, or "all"`)
+	cmd.Flags().StringSlice("oci-regions", nil, `OCI regions to scan (default: every subscribed region)`)
 	cmd.Flags().String("kube-context", "", "kubeconfig context name")
 	cmd.Flags().String("kube-namespace", "", "limit Kubernetes audit to a single namespace")
 	cmd.Flags().StringSlice("kube-exclude-namespaces",

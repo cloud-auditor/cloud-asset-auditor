@@ -135,16 +135,18 @@ Collect assets from one or more providers and render them as JSON, CSV, or XLSX.
 | `-o`, `--output string`           | `AUDITOR_OUTPUT`                     | `json`        | `json`, `csv`, or `xlsx` |
 | `--output-file string`            | `AUDITOR_OUTPUT_FILE`                | stdout        | `-` is treated as stdout. Required for `xlsx` unless stdout is redirected (it's binary). |
 | `--stream`                        | `AUDITOR_STREAM`                     | `false`       | With `-o json`, emit NDJSON (one object per line) instead of an array |
-| `--sheet-by string`               | `AUDITOR_SHEET_BY`                   | `provider`    | With `-o xlsx`, split assets across worksheets: `none\|provider\|type\|region\|account\|tag:KEY` (e.g. `tag:compartment_id`) |
+| `--sheet-by string`               | `AUDITOR_SHEET_BY`                   | `provider`    | With `-o xlsx`, split worksheets by one or more `+`-joined dimensions: `none\|provider\|type\|region\|account\|tag:KEY` (e.g. `tag:compartment_id`, or `region+tag:compartment_id` for a sheet per region/compartment labelled `region (compartment)`) |
+| `--summary`                       | `AUDITOR_SUMMARY`                    | `false`       | With `-o xlsx`, prepend a Summary worksheet (totals + per-sheet and per-type counts, each per-sheet row linked to its worksheet) |
 | `--include-raw`                   | `AUDITOR_INCLUDE_RAW`                | `false`       | Attach the full upstream SDK payload to each `Asset.Raw` |
 | `--max-concurrency int`           | `AUDITOR_MAX_CONCURRENCY`            | `5`           | Per-provider parallelism cap |
 | `--timeout duration`              | `AUDITOR_TIMEOUT`                    | `10m`         | Overall audit timeout |
 | `--config string`                 | n/a (flag-only)                      | (see above)   | Override the config-file search path |
 | `--oci-profile string`            | `AUDITOR_OCI_PROFILE`                | (DEFAULT)     | `~/.oci/config` profile name |
-| `--oci-regions strings`           | `AUDITOR_OCI_REGIONS`                | (home region) | Or `all` for every subscribed region |
+| `--oci-regions strings`           | `AUDITOR_OCI_REGIONS`                | (all subscribed regions) | Comma-separated list to narrow; falls back to home region if the subscription lookup fails |
 | `--kube-context string`           | `AUDITOR_KUBE_CONTEXT`               | (current)     | kubeconfig context to use |
 | `--kube-namespace string`         | `AUDITOR_KUBE_NAMESPACE`             | (all)         | Restrict to a single namespace |
 | `--kube-exclude-namespaces strings` | `AUDITOR_KUBE_EXCLUDE_NAMESPACES`  | `kube-system,kube-public,kube-node-lease` | Skip these namespaces |
+| `--kube-exclude-helm-secrets`     | `AUDITOR_KUBE_EXCLUDE_HELM_SECRETS` | `false`       | Skip Helm v3 release-state Secrets (type `helm.sh/release.v1`) |
 
 ### Exit codes
 

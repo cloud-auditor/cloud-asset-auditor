@@ -32,6 +32,7 @@ type Config struct {
 	KubeContext           string
 	KubeNamespace         string   // empty means all namespaces (minus excluded)
 	KubeExcludeNamespaces []string // ignored when KubeNamespace is set
+	ExcludeHelmSecrets    bool     // skip Helm v3 release-state Secrets
 	MaxConcurrency        int
 	IncludeRaw            bool
 }
@@ -100,6 +101,8 @@ func (p *Provider) SetKubeExcludeNamespaces(ns []string) {
 		p.cfg.KubeExcludeNamespaces = ns
 	}
 }
+
+func (p *Provider) SetKubeExcludeHelmSecrets(b bool) { p.cfg.ExcludeHelmSecrets = b }
 
 // ensureClients resolves the REST config, builds the discovery + dynamic
 // clients, and records a cluster identifier — all exactly once.

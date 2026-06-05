@@ -128,6 +128,94 @@ func TestXLSX_TagGrouping_ResolvesNameAndPlacesContainer(t *testing.T) {
 	}
 }
 
+func TestXLSX_CompositeRegionAndCompartment(t *testing.T) {
+	assets := []core.Asset{
+		// The compartment container is region-less; its resources span regions.
+		{Provider: "oci", Type: "oci.compartment", ID: "ocid.comp.A", Name: "production"},
+		{Provider: "oci", Type: "oci.vcn", ID: "v1", Name: "jed-vcn", Region: "me-jeddah-1",
+			Tags: map[string]string{"compartment_id": "ocid.comp.A"}},
+		{Provider: "oci", Type: "oci.subnet", ID: "s1", Name: "jed-subnet", Region: "me-jeddah-1",
+			Tags: map[string]string{"compartment_id": "ocid.comp.A"}},
+		{Provider: "oci", Type: "oci.vcn", ID: "v2", Name: "riy-vcn", Region: "me-riyadh-1",
+			Tags: map[string]string{"compartment_id": "ocid.comp.A"}},
+	}
+	f := renderXLSX(t, &output.XLSX{SheetBy: "region+tag:compartment_id"}, assets)
+
+	got := f.GetSheetList()
+	// One sheet per (region, compartment); the region-less compartment asset
+	// lands in its own "(no region) (production)" sheet.
+	want := []string{"(no region) (production)", "me-jeddah-1 (production)", "me-riyadh-1 (production)"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sheets = %v, want %v", got, want)
+	}
+
+	jed := rowsOf(t, f, "me-jeddah-1 (production)")
+	if len(jed) != 3 { // header + vcn + subnet
+		t.Fatalf("jeddah rows = %d, want 3", len(jed))
+	}
+	// The grouping tag is dropped from the columns (redundant with the sheet).
+	for _, h := range jed[0] {
+		if h == "Compartment Id" {
+			t.Errorf("grouping tag should not be a column: %v", jed[0])
+		}
+	}
+	if riy := rowsOf(t, f, "me-riyadh-1 (production)"); len(riy) != 2 { // header + 1 vcn
+		t.Errorf("riyadh rows = %d, want 2", len(riy))
+	}
+	if comp := rowsOf(t, f, "(no region) (production)"); len(comp) != 2 { // header + compartment
+		t.Errorf("compartment sheet rows = %d, want 2", len(comp))
+	}
+}
+
+func TestXLSX_CompositeLabelResolvesEmptyAndName(t *testing.T) {
+	// provider+region: head bare, region parenthesised; empty region → "(no region)".
+	assets := []core.Asset{
+		{Provider: "oci", Type: "t", ID: "a", Region: "me-jeddah-1"},
+		{Provider: "oci", Type: "t", ID: "b", Region: ""},
+	}
+	f := renderXLSX(t, &output.XLSX{SheetBy: "provider+region"}, assets)
+	got := f.GetSheetList()
+	want := []string{"oci (me-jeddah-1)", "oci (no region)"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sheets = %v, want %v", got, want)
+	}
+}
+
+func TestXLSX_CompositeValidation(t *testing.T) {
+	ok := []string{"region+tag:compartment_id", "provider+type+region", "tag:a+tag:b"}
+	for _, s := range ok {
+		if err := (&output.XLSX{SheetBy: s}).Validate(); err != nil {
+			t.Errorf("Validate(%q) = %v, want nil", s, err)
+		}
+	}
+	bad := []string{"region+bogus", "region+tag:", "region+", "+region", "tag:",
+		"region+region", "tag:a+tag:a"} // duplicate dimensions are rejected
+	for _, s := range bad {
+		if err := (&output.XLSX{SheetBy: s}).Validate(); err == nil {
+			t.Errorf("Validate(%q) = nil, want error", s)
+		}
+	}
+}
+
+func TestXLSX_CompositeExcludesAllGroupingTagColumns(t *testing.T) {
+	// With two tag dimensions, BOTH grouping tag keys are dropped from the
+	// per-sheet columns; a third, non-grouping tag survives as a column.
+	assets := []core.Asset{
+		{Provider: "oci", Type: "t", ID: "x1", Name: "one",
+			Tags: map[string]string{"a": "A1", "b": "B1", "c": "C1"}},
+	}
+	f := renderXLSX(t, &output.XLSX{SheetBy: "tag:a+tag:b"}, assets)
+	rows := rowsOf(t, f, "A1 (B1)")
+	for _, h := range rows[0] {
+		if h == "A" || h == "B" {
+			t.Errorf("grouping tag column %q should be excluded: %v", h, rows[0])
+		}
+	}
+	if headerIndex(t, rows, "C") < 0 {
+		t.Errorf("non-grouping tag column C missing: %v", rows[0])
+	}
+}
+
 func TestXLSX_TagColumnsAreUnionPerSheet(t *testing.T) {
 	assets := []core.Asset{
 		{Provider: "oci", Type: "oci.compute.instance", ID: "i1", Name: "vm",
@@ -149,6 +237,121 @@ func TestXLSX_TagColumnsAreUnionPerSheet(t *testing.T) {
 	if cellAt(rows[2], nameCol) != "alice" || cellAt(rows[2], emailCol) != "a@x" || cellAt(rows[2], shapeCol) != "" {
 		t.Errorf("alice row wrong: %v", rows[2])
 	}
+}
+
+func TestXLSX_TagHeaderCollidesWithCoreColumn(t *testing.T) {
+	// A label/tag key whose pretty header equals a core column ("name" -> "Name",
+	// "status" -> "Status") must not produce a duplicate column header; the tag
+	// column is disambiguated and the value still lands under it.
+	assets := []core.Asset{
+		{Provider: "kubernetes", Type: "v1.Secret", ID: "x1", Name: "argocd",
+			Status: "Active", Tags: map[string]string{"name": "argocd-root-apps", "status": "synced"}},
+	}
+	f := renderXLSX(t, &output.XLSX{SheetBy: "none"}, assets)
+	rows := rowsOf(t, f, "Assets")
+
+	// No header appears twice.
+	seen := map[string]int{}
+	for _, h := range rows[0] {
+		seen[h]++
+	}
+	for h, n := range seen {
+		if n > 1 {
+			t.Errorf("duplicate column header %q (x%d): %v", h, n, rows[0])
+		}
+	}
+
+	// The core columns keep their resource values...
+	nameCol := headerIndex(t, rows, "Name")
+	statusCol := headerIndex(t, rows, "Status")
+	if cellAt(rows[1], nameCol) != "argocd" {
+		t.Errorf("core Name = %q, want argocd", cellAt(rows[1], nameCol))
+	}
+	if cellAt(rows[1], statusCol) != "Active" {
+		t.Errorf("core Status = %q, want Active", cellAt(rows[1], statusCol))
+	}
+	// ...and the colliding label values appear under the disambiguated columns.
+	nameTagCol := headerIndex(t, rows, "Name (tag)")
+	statusTagCol := headerIndex(t, rows, "Status (tag)")
+	if cellAt(rows[1], nameTagCol) != "argocd-root-apps" {
+		t.Errorf("Name (tag) = %q, want argocd-root-apps", cellAt(rows[1], nameTagCol))
+	}
+	if cellAt(rows[1], statusTagCol) != "synced" {
+		t.Errorf("Status (tag) = %q, want synced", cellAt(rows[1], statusTagCol))
+	}
+}
+
+func TestXLSX_SummarySheet(t *testing.T) {
+	assets := []core.Asset{
+		{Provider: "kubernetes", Type: "v1.Pod", ID: "p1", Name: "pod-a",
+			Tags: map[string]string{"namespace": "argocd"}},
+		{Provider: "kubernetes", Type: "v1.Pod", ID: "p2", Name: "pod-b",
+			Tags: map[string]string{"namespace": "argocd"}},
+		{Provider: "kubernetes", Type: "v1.Service", ID: "s1", Name: "svc",
+			Tags: map[string]string{"namespace": "loki"}},
+	}
+	f := renderXLSX(t, &output.XLSX{SheetBy: "tag:namespace", Summary: true}, assets)
+
+	// Summary is the FIRST sheet, followed by the group sheets.
+	got := f.GetSheetList()
+	want := []string{"Summary", "argocd", "loki"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sheets = %v, want %v", got, want)
+	}
+
+	rows := rowsOf(t, f, "Summary")
+	// Flatten all summary cells for simple content assertions.
+	flat := map[string]string{}
+	for _, r := range rows {
+		for i := 0; i+1 < len(r); i++ {
+			if r[i] != "" {
+				flat[r[i]] = r[i+1]
+			}
+		}
+	}
+	if flat["Total assets"] != "3" {
+		t.Errorf("Total assets = %q, want 3 (cells: %v)", flat["Total assets"], rows)
+	}
+	if flat["Worksheets"] != "2" {
+		t.Errorf("Worksheets = %q, want 2", flat["Worksheets"])
+	}
+	// Per-sheet section uses the tag's pretty name and lists each namespace count.
+	if _, ok := flat["By Namespace"]; !ok {
+		t.Errorf("missing 'By Namespace' header: %v", rows)
+	}
+	if flat["argocd"] != "2" || flat["loki"] != "1" {
+		t.Errorf("per-namespace counts wrong: argocd=%q loki=%q", flat["argocd"], flat["loki"])
+	}
+	// Per-type section.
+	if flat["v1.Pod"] != "2" || flat["v1.Service"] != "1" {
+		t.Errorf("per-type counts wrong: Pod=%q Service=%q", flat["v1.Pod"], flat["v1.Service"])
+	}
+}
+
+func TestXLSX_SummaryHyperlinkTargetsSheet(t *testing.T) {
+	assets := []core.Asset{
+		{Provider: "oci", Type: "t", ID: "a", Region: "me-jeddah-1"},
+	}
+	f := renderXLSX(t, &output.XLSX{SheetBy: "region", Summary: true}, assets)
+	rows := rowsOf(t, f, "Summary")
+	// Find the cell holding the group label and assert it carries a hyperlink
+	// to that sheet.
+	for ri, r := range rows {
+		for ci, c := range r {
+			if c == "me-jeddah-1" {
+				axis, _ := excelize.CoordinatesToCellName(ci+1, ri+1)
+				ok, target, err := f.GetCellHyperLink("Summary", axis)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !ok || target != "'me-jeddah-1'!A1" {
+					t.Errorf("hyperlink = (%v, %q), want true, 'me-jeddah-1'!A1", ok, target)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("group label 'me-jeddah-1' not found in summary")
 }
 
 func TestXLSX_Empty_ProducesValidWorkbook(t *testing.T) {

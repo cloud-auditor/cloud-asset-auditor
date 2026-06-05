@@ -52,6 +52,11 @@ type Provider struct {
 	nsOnce sync.Once
 	nsName string
 	nsErr  error
+
+	// listSubscribed resolves the tenancy's subscribed regions. It's a field
+	// so tests can stub the identity API without live auth; nil means "use the
+	// real SDK call" (listSubscribedRegions).
+	listSubscribed func(ctx context.Context) ([]string, error)
 }
 
 // Compile-time checks for the optional interfaces.
@@ -194,6 +199,15 @@ func iStr(p *int) string {
 		return ""
 	}
 	return strconv.Itoa(*p)
+}
+
+// boolStr formats an optional *bool as a tag value, returning "" for nil so an
+// unset field reads as empty rather than a misleading "false".
+func boolStr(p *bool) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.FormatBool(*p)
 }
 
 // mergeFreeformTags copies freeform tags into a fresh map, leaving room for

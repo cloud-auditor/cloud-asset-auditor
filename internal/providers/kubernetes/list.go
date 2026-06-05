@@ -46,6 +46,9 @@ func (p *Provider) listResource(ctx context.Context, t resourceTarget, out chan<
 					continue
 				}
 			}
+			if p.cfg.ExcludeHelmSecrets && isHelmReleaseSecret(item) {
+				continue
+			}
 			if !sendAsset(ctx, out, p.unstructuredToAsset(item)) {
 				return nil
 			}

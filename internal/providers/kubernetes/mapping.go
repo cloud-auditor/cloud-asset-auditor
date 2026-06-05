@@ -77,6 +77,25 @@ func collapseTags(labels map[string]string, namespace string) map[string]string 
 	return out
 }
 
+// helmReleaseSecretType is the Secret.type Helm v3 stamps on the Secrets it
+// uses to store release state (one per revision, named sh.helm.release.v1.*).
+const helmReleaseSecretType = "helm.sh/release.v1"
+
+// isHelmReleaseSecret reports whether an object is a Helm v3 release-state
+// Secret. These are deployment bookkeeping, not real cluster assets, so the
+// --kube-exclude-helm-secrets flag drops them. The canonical signal is the
+// Secret's type field; the sh.helm.release.v1.* name prefix is a fallback for
+// objects surfaced without their type (e.g. partial metadata responses).
+func isHelmReleaseSecret(u *unstructured.Unstructured) bool {
+	if u.GetKind() != "Secret" {
+		return false
+	}
+	if t, ok, _ := unstructured.NestedString(u.Object, "type"); ok && t == helmReleaseSecretType {
+		return true
+	}
+	return strings.HasPrefix(u.GetName(), "sh.helm.release.v")
+}
+
 // isSubresource reports whether an APIResource name represents a
 // subresource (status, scale, etc.). Those have "parent/sub" names; we
 // never list them as top-level inventory items.

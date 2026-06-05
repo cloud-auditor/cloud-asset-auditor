@@ -56,12 +56,12 @@ export CLOUDFLARE_API_TOKEN=cf-token-with-zone-read-and-dns-read
 # instances, OKE, vaults, IAM).
 #   Auth chain (auto-detected): instance principal → resource principal
 #   → ~/.oci/config → OCI_* env vars
-./bin/auditor audit --provider oci -o json                       # home region only
-./bin/auditor audit --provider oci --oci-regions all -o csv      # every subscribed region
+./bin/auditor audit --provider oci -o json                       # every subscribed region (default)
+./bin/auditor audit --provider oci --oci-regions me-jeddah-1 -o csv  # narrow to one region
 ./bin/auditor audit --provider oci --oci-profile PROD            # named profile
-# Excel workbook, one worksheet per compartment:
-./bin/auditor audit --provider oci --oci-regions all \
-  -o xlsx --sheet-by tag:compartment_id --output-file oci-assets.xlsx
+# Excel workbook, one worksheet per region/compartment (tab = "region (compartment)"):
+./bin/auditor audit --provider oci \
+  -o xlsx --sheet-by region+tag:compartment_id --output-file oci-assets.xlsx
 
 # Kubernetes (Phase 4): every resource type the cluster exposes — built-ins
 # and CRDs — via dynamic discovery. No need to list "what to scan"; the
@@ -72,6 +72,9 @@ export CLOUDFLARE_API_TOKEN=cf-token-with-zone-read-and-dns-read
 ./bin/auditor audit --provider kubernetes --kube-context kind-dev -o csv
 ./bin/auditor audit --provider kubernetes --kube-namespace prod
 ./bin/auditor audit --provider kubernetes --kube-exclude-namespaces kube-system,kube-public,kube-node-lease
+# Excel: a sheet per namespace, a Summary sheet up front, Helm release Secrets dropped:
+./bin/auditor audit --provider kubernetes --kube-exclude-helm-secrets \
+  -o xlsx --sheet-by tag:namespace --summary --output-file k8s-assets.xlsx
 
 ./bin/auditor audit --include-raw -o json                        # any provider, with full SDK payloads
 

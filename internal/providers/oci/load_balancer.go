@@ -12,7 +12,7 @@ import (
 
 // collectLoadBalancers enumerates classic Load Balancers in one compartment
 // from one region. (Network Load Balancers — the newer, layer-4 variant —
-// live in a separate SDK package and are a separate collector for later.)
+// live in a separate SDK package; see network_load_balancer.go.)
 //
 // This collector is specifically what Phase 10's topology view needs to
 // connect Cloudflare DNS records to OCI compute / OKE backends.

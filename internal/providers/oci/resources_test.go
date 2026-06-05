@@ -12,6 +12,7 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/functions"
 	"github.com/oracle/oci-go-sdk/v65/identity"
 	"github.com/oracle/oci-go-sdk/v65/keymanagement"
+	"github.com/oracle/oci-go-sdk/v65/networkloadbalancer"
 	"github.com/oracle/oci-go-sdk/v65/objectstorage"
 )
 
@@ -20,6 +21,7 @@ func testProvider() *Provider { return &Provider{tenancyOCID: "ocid1.tenancy.oc1
 
 func ptrInt64(i int64) *int64 { return &i }
 func ptrIntVal(i int) *int    { return &i }
+func ptrBool(b bool) *bool    { return &b }
 
 func TestVCNToAsset(t *testing.T) {
 	created := time.Date(2025, 4, 1, 0, 0, 0, 0, time.UTC)
@@ -75,6 +77,166 @@ func TestSubnetToAsset(t *testing.T) {
 	}
 	if a.Tags["vcn_id"] != "ocid1.vcn.oc1..v1" || a.Tags["cidr_block"] != "10.0.1.0/24" {
 		t.Errorf("subnet tags: %v", a.Tags)
+	}
+}
+
+func TestNATGatewayToAsset(t *testing.T) {
+	created := time.Date(2025, 5, 6, 7, 8, 9, 0, time.UTC)
+	a := testProvider().natGatewayToAsset(occore.NatGateway{
+		Id:             ptrString("ocid1.natgateway.oc1..ng1"),
+		CompartmentId:  ptrString("ocid1.compartment.oc1..net"),
+		DisplayName:    ptrString("prod-nat"),
+		VcnId:          ptrString("ocid1.vcn.oc1..v1"),
+		NatIp:          ptrString("203.0.113.42"),
+		BlockTraffic:   ptrBool(false),
+		LifecycleState: occore.NatGatewayLifecycleStateAvailable,
+		TimeCreated:    &common.SDKTime{Time: created},
+		FreeformTags:   map[string]string{"team": "net"},
+	}, "me-jeddah-1")
+
+	if a.Type != "oci.nat_gateway" || a.ID != "ocid1.natgateway.oc1..ng1" || a.Name != "prod-nat" {
+		t.Errorf("nat gateway core fields: %+v", a)
+	}
+	if a.Tags["nat_ip"] != "203.0.113.42" {
+		t.Errorf("Tags[nat_ip] = %q", a.Tags["nat_ip"])
+	}
+	if a.Tags["vcn_id"] != "ocid1.vcn.oc1..v1" {
+		t.Errorf("Tags[vcn_id] = %q", a.Tags["vcn_id"])
+	}
+	if a.Tags["block_traffic"] != "false" {
+		t.Errorf("Tags[block_traffic] = %q", a.Tags["block_traffic"])
+	}
+	if a.Tags["team"] != "net" {
+		t.Error("freeform tag missing")
+	}
+}
+
+func TestInternetGatewayToAsset(t *testing.T) {
+	a := testProvider().internetGatewayToAsset(occore.InternetGateway{
+		Id:             ptrString("ocid1.internetgateway.oc1..ig1"),
+		CompartmentId:  ptrString("ocid1.compartment.oc1..net"),
+		DisplayName:    ptrString("prod-igw"),
+		VcnId:          ptrString("ocid1.vcn.oc1..v1"),
+		IsEnabled:      ptrBool(true),
+		LifecycleState: occore.InternetGatewayLifecycleStateAvailable,
+	}, "me-jeddah-1")
+
+	if a.Type != "oci.internet_gateway" || a.ID != "ocid1.internetgateway.oc1..ig1" {
+		t.Errorf("internet gateway core fields: %+v", a)
+	}
+	if a.Tags["is_enabled"] != "true" || a.Tags["vcn_id"] != "ocid1.vcn.oc1..v1" {
+		t.Errorf("internet gateway tags: %v", a.Tags)
+	}
+}
+
+func TestServiceGatewayToAsset(t *testing.T) {
+	a := testProvider().serviceGatewayToAsset(occore.ServiceGateway{
+		Id:             ptrString("ocid1.servicegateway.oc1..sg1"),
+		CompartmentId:  ptrString("ocid1.compartment.oc1..net"),
+		DisplayName:    ptrString("prod-sgw"),
+		VcnId:          ptrString("ocid1.vcn.oc1..v1"),
+		BlockTraffic:   ptrBool(false),
+		LifecycleState: occore.ServiceGatewayLifecycleStateAvailable,
+	}, "me-jeddah-1")
+
+	if a.Type != "oci.service_gateway" || a.ID != "ocid1.servicegateway.oc1..sg1" {
+		t.Errorf("service gateway core fields: %+v", a)
+	}
+	if a.Tags["block_traffic"] != "false" || a.Tags["vcn_id"] != "ocid1.vcn.oc1..v1" {
+		t.Errorf("service gateway tags: %v", a.Tags)
+	}
+}
+
+func TestLocalPeeringGatewayToAsset(t *testing.T) {
+	a := testProvider().localPeeringGatewayToAsset(occore.LocalPeeringGateway{
+		Id:                 ptrString("ocid1.localpeeringgateway.oc1..lpg1"),
+		CompartmentId:      ptrString("ocid1.compartment.oc1..net"),
+		DisplayName:        ptrString("prod-lpg"),
+		VcnId:              ptrString("ocid1.vcn.oc1..v1"),
+		PeeringStatus:      occore.LocalPeeringGatewayPeeringStatusPeered,
+		PeerAdvertisedCidr: ptrString("10.1.0.0/16"),
+		LifecycleState:     occore.LocalPeeringGatewayLifecycleStateAvailable,
+	}, "me-jeddah-1")
+
+	if a.Type != "oci.local_peering_gateway" || a.ID != "ocid1.localpeeringgateway.oc1..lpg1" {
+		t.Errorf("local peering gateway core fields: %+v", a)
+	}
+	if a.Tags["peering_status"] != "PEERED" || a.Tags["peer_advertised_cidr"] != "10.1.0.0/16" {
+		t.Errorf("local peering gateway tags: %v", a.Tags)
+	}
+}
+
+func TestDRGToAsset(t *testing.T) {
+	created := time.Date(2025, 5, 20, 1, 2, 3, 0, time.UTC)
+	a := testProvider().drgToAsset(occore.Drg{
+		Id:             ptrString("ocid1.drg.oc1..drg1"),
+		CompartmentId:  ptrString("ocid1.compartment.oc1..net"),
+		DisplayName:    ptrString("prod-drg"),
+		LifecycleState: occore.DrgLifecycleStateAvailable,
+		TimeCreated:    &common.SDKTime{Time: created},
+		FreeformTags:   map[string]string{"team": "net"},
+	}, "me-jeddah-1")
+
+	if a.Type != "oci.drg" || a.ID != "ocid1.drg.oc1..drg1" || a.Name != "prod-drg" {
+		t.Errorf("drg core fields: %+v", a)
+	}
+	if a.Status != "AVAILABLE" {
+		t.Errorf("Status = %q", a.Status)
+	}
+	if a.Tags["compartment_id"] != "ocid1.compartment.oc1..net" || a.Tags["team"] != "net" {
+		t.Errorf("drg tags: %v", a.Tags)
+	}
+}
+
+func TestNetworkLoadBalancerToAsset(t *testing.T) {
+	created := time.Date(2025, 6, 1, 2, 3, 4, 0, time.UTC)
+	a := testProvider().networkLoadBalancerToAsset(networkloadbalancer.NetworkLoadBalancerSummary{
+		Id:             ptrString("ocid1.networkloadbalancer.oc1..nlb1"),
+		CompartmentId:  ptrString("ocid1.compartment.oc1..net"),
+		DisplayName:    ptrString("prod-nlb"),
+		SubnetId:       ptrString("ocid1.subnet.oc1..s1"),
+		IsPrivate:      ptrBool(false),
+		LifecycleState: networkloadbalancer.LifecycleStateActive,
+		TimeCreated:    &common.SDKTime{Time: created},
+		IpAddresses: []networkloadbalancer.IpAddress{
+			{IpAddress: ptrString("203.0.113.20")},
+			{IpAddress: ptrString("203.0.113.21")},
+		},
+		FreeformTags: map[string]string{"team": "net"},
+	}, "me-jeddah-1")
+
+	if a.Type != "oci.network_load_balancer" || a.ID != "ocid1.networkloadbalancer.oc1..nlb1" {
+		t.Errorf("nlb core fields: %+v", a)
+	}
+	if a.Tags["ip_addresses"] != "203.0.113.20,203.0.113.21" {
+		t.Errorf("Tags[ip_addresses] = %q (Phase 10 topology depends on this format)", a.Tags["ip_addresses"])
+	}
+	if a.Tags["is_private"] != "false" || a.Tags["subnet_id"] != "ocid1.subnet.oc1..s1" {
+		t.Errorf("nlb tags: %v", a.Tags)
+	}
+}
+
+func TestJoinNLBIPAddresses(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []networkloadbalancer.IpAddress
+		want string
+	}{
+		{"empty", nil, ""},
+		{"single", []networkloadbalancer.IpAddress{{IpAddress: ptrString("1.2.3.4")}}, "1.2.3.4"},
+		{"skips nil and empty", []networkloadbalancer.IpAddress{
+			{IpAddress: ptrString("1.1.1.1")},
+			{IpAddress: nil},
+			{IpAddress: ptrString("")},
+			{IpAddress: ptrString("2.2.2.2")},
+		}, "1.1.1.1,2.2.2.2"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := joinNLBIPAddresses(c.in); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 

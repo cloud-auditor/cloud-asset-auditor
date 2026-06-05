@@ -148,11 +148,23 @@ paths:
           in: query
           description: >
             For `format=xlsx` only: how to partition assets across worksheets.
-            One of `none`, `provider`, `type`, `region`, `account`, or
-            `tag:KEY` (e.g. `tag:compartment_id`). Ignored for other formats.
+            One dimension — `none`, `provider`, `type`, `region`, `account`, or
+            `tag:KEY` (e.g. `tag:compartment_id`) — or several joined with `+`
+            for a composite (e.g. `region+tag:compartment_id` for one sheet per
+            region/compartment, labelled `region (compartment)`). Ignored for
+            other formats.
           schema:
             type: string
             default: provider
+        - name: summary
+          in: query
+          description: >
+            For `format=xlsx` only: when truthy (`1`/`true`/`yes`/`on`), prepend
+            a "Summary" worksheet with totals and per-sheet/per-type counts,
+            each per-sheet row linked to its worksheet. Ignored for other formats.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: Rendered audit output

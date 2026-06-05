@@ -3,6 +3,7 @@ package oci
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -192,14 +193,69 @@ func TestJoinIPAddresses(t *testing.T) {
 	}
 }
 
-func TestResolveRegions_DefaultsToHomeRegion(t *testing.T) {
-	p := &Provider{homeRegion: "us-ashburn-1"}
+func TestResolveRegions_DefaultsToAllSubscribed(t *testing.T) {
+	p := &Provider{
+		homeRegion: "us-ashburn-1",
+		listSubscribed: func(context.Context) ([]string, error) {
+			return []string{"us-ashburn-1", "us-phoenix-1", "uk-london-1"}, nil
+		},
+	}
+	got, err := p.resolveRegions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"us-ashburn-1", "us-phoenix-1", "uk-london-1"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("[%d] got %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestResolveRegions_AllSentinelMatchesDefault(t *testing.T) {
+	p := &Provider{
+		homeRegion: "us-ashburn-1",
+		cfg:        Config{Regions: []string{"ALL"}},
+		listSubscribed: func(context.Context) ([]string, error) {
+			return []string{"us-ashburn-1", "us-phoenix-1"}, nil
+		},
+	}
+	got, err := p.resolveRegions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "us-ashburn-1" || got[1] != "us-phoenix-1" {
+		t.Errorf("got %v, want [us-ashburn-1 us-phoenix-1]", got)
+	}
+}
+
+func TestResolveRegions_FallsBackToHomeOnSubscriptionError(t *testing.T) {
+	p := &Provider{
+		homeRegion: "us-ashburn-1",
+		listSubscribed: func(context.Context) ([]string, error) {
+			return nil, fmt.Errorf("NotAuthorizedOrNotFound")
+		},
+	}
 	got, err := p.resolveRegions(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0] != "us-ashburn-1" {
-		t.Errorf("got %v, want [us-ashburn-1]", got)
+		t.Errorf("got %v, want [us-ashburn-1] (fallback to home region)", got)
+	}
+}
+
+func TestResolveRegions_ErrorsWhenNoFallback(t *testing.T) {
+	p := &Provider{
+		listSubscribed: func(context.Context) ([]string, error) {
+			return nil, fmt.Errorf("boom")
+		},
+	}
+	if _, err := p.resolveRegions(context.Background()); err == nil {
+		t.Fatal("expected error when subscription lookup fails and home region is empty")
 	}
 }
 

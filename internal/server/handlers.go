@@ -111,7 +111,11 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 	if format == "" {
 		format = "json"
 	}
-	renderer, contentType, err := buildExportRenderer(format, strings.ToLower(r.URL.Query().Get("sheet_by")))
+	// sheet_by is passed verbatim (not lower-cased): a tag key like
+	// tag:MyLabel is case-sensitive, and the dimension keywords are already
+	// lower-case — matching the CLI's --sheet-by handling.
+	summary := parseBoolParam(r.URL.Query().Get("summary"))
+	renderer, contentType, err := buildExportRenderer(format, r.URL.Query().Get("sheet_by"), summary)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -148,7 +152,7 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func buildExportRenderer(format, sheetBy string) (output.Renderer, string, error) {
+func buildExportRenderer(format, sheetBy string, summary bool) (output.Renderer, string, error) {
 	switch format {
 	case "json":
 		return &output.JSON{}, "application/json", nil
@@ -160,7 +164,7 @@ func buildExportRenderer(format, sheetBy string) (output.Renderer, string, error
 		if sheetBy == "" {
 			sheetBy = "provider"
 		}
-		r := &output.XLSX{SheetBy: sheetBy}
+		r := &output.XLSX{SheetBy: sheetBy, Summary: summary}
 		if err := r.Validate(); err != nil {
 			return nil, "", err
 		}
@@ -182,6 +186,16 @@ func parseProvidersParam(raw string) []string {
 		}
 	}
 	return out
+}
+
+// parseBoolParam treats the common truthy spellings ("1", "true", "yes", "on",
+// case-insensitive) as true; everything else (including empty) is false.
+func parseBoolParam(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func parseTimeoutParam(raw string) time.Duration {

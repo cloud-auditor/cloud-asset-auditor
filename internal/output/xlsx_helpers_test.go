@@ -66,7 +66,7 @@ func TestUnionTagKeys(t *testing.T) {
 		{Tags: map[string]string{"compartment_id": "C", "email": "a@x"}},
 		{Tags: nil},
 	}
-	got := unionTagKeys(assets, "compartment_id")
+	got := unionTagKeys(assets, map[string]bool{"compartment_id": true})
 	want := []string{"email", "shape"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("unionTagKeys = %v, want %v", got, want)
