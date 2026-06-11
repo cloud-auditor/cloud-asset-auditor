@@ -10,9 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	cf "github.com/cloudflare/cloudflare-go/v4"
+	"github.com/cloudflare/cloudflare-go/v4/accounts"
 	"github.com/cloudflare/cloudflare-go/v4/option"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
@@ -35,6 +37,11 @@ type Config struct {
 type Provider struct {
 	client *cf.Client
 	cfg    Config
+
+	// listAccounts cache — see accounts.go.
+	accountsOnce sync.Once
+	accounts     []accounts.Account
+	accountsErr  error
 }
 
 // Compile-time check that we satisfy the optional Configurable interfaces.

@@ -55,7 +55,8 @@ func (p *Provider) run(ctx context.Context, assets chan<- core.Asset, errs chan<
 		})
 	}
 
-	// Account-scoped (Phase 2 v0.1: all stubs except as noted).
+	// Account-scoped.
+	collect("accounts", func(c context.Context) error { return p.collectAccounts(c, assets) })
 	collect("r2", func(c context.Context) error { return p.collectR2(c, assets) })
 	collect("kv", func(c context.Context) error { return p.collectKV(c, assets) })
 	collect("workers", func(c context.Context) error { return p.collectWorkers(c, assets) })
