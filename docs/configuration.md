@@ -171,6 +171,7 @@ Ingress / HTTPRoute payloads); the rendered output omits `raw`.
 | Flag                    | Default        | Notes |
 | ----------------------- | -------------- | ----- |
 | `--provider strings`    | (all)          | Comma-separated subset |
+| `--from string`         | (live audit)   | Build the graph from a saved `audit -o json` snapshot (array or NDJSON) instead of running providers — instant; pair the snapshot with `--include-raw` for the K8s payload resolvers |
 | `-o`, `--output string` | `json`         | `json`, `dot`, `mermaid`, `excalidraw`, `html` (standalone interactive force-directed viewer — one self-contained file) |
 | `--output-file string`  | stdout         | `-` is treated as stdout |
 | `--hostname strings`    | (all)          | Trace only the connected component(s) reachable from these DNS hostnames |

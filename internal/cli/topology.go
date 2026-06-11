@@ -30,6 +30,10 @@ Examples:
   auditor topology -o json | jq '.edges[] | select(.kind == "lb-backend")'
   auditor topology -o excalidraw > topology.excalidraw   # drag into excalidraw.com to edit
   auditor topology -o html > topology.html               # self-contained interactive viewer
+
+  # Build from a saved snapshot instead of a live audit (instant; pair
+  # with 'audit -o json --include-raw' so the K8s resolvers see payloads):
+  auditor topology --from assets.json -o html > topology.html
 `,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := s.v.BindPFlags(cmd.Flags()); err != nil {
@@ -56,41 +60,55 @@ Examples:
 			}
 			defer closeOut()
 
-			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
-			defer cancel()
-
-			selected := selectProviders(providers)
-			// Force --include-raw=true and apply other knobs. Resolvers
-			// parse Raw for Service / Ingress / HTTPRoute payloads — the
-			// graph would be empty for those without it.
-			applyProviderOptions(selected, providerOptions{
-				maxConcurrency:        maxConcurrency,
-				includeRaw:            true,
-				ociProfile:            v.GetString("oci-profile"),
-				ociRegions:            v.GetStringSlice("oci-regions"),
-				kubeContext:           v.GetString("kube-context"),
-				kubeNamespace:         v.GetString("kube-namespace"),
-				kubeExcludeNamespaces: v.GetStringSlice("kube-exclude-namespaces"),
-			})
-
-			// Materialize every asset before building the topology — the
-			// resolvers need the full set for index lookups, not a stream.
-			assets, errs := runProviders(ctx, selected)
-			collected := make([]core.Asset, 0, 1024)
-			var provErrs []error
-			errsDone := make(chan struct{})
-			go func() {
-				for e := range errs {
-					if e != nil {
-						provErrs = append(provErrs, e)
-					}
+			var (
+				collected []core.Asset
+				provErrs  []error
+			)
+			if from := v.GetString("from"); from != "" {
+				// Snapshot path: no providers, no audit — the graph is
+				// built from a saved `audit -o json` file (array or
+				// NDJSON, sniffed by diff.Load via the same loadSnapshot
+				// the diff command uses). Mirrors POST /api/v1/topology.
+				collected, err = loadSnapshot(from)
+				if err != nil {
+					return err
 				}
-				close(errsDone)
-			}()
-			for a := range assets {
-				collected = append(collected, a)
+			} else {
+				ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+				defer cancel()
+
+				selected := selectProviders(providers)
+				// Force --include-raw=true and apply other knobs. Resolvers
+				// parse Raw for Service / Ingress / HTTPRoute payloads — the
+				// graph would be empty for those without it.
+				applyProviderOptions(selected, providerOptions{
+					maxConcurrency:        maxConcurrency,
+					includeRaw:            true,
+					ociProfile:            v.GetString("oci-profile"),
+					ociRegions:            v.GetStringSlice("oci-regions"),
+					kubeContext:           v.GetString("kube-context"),
+					kubeNamespace:         v.GetString("kube-namespace"),
+					kubeExcludeNamespaces: v.GetStringSlice("kube-exclude-namespaces"),
+				})
+
+				// Materialize every asset before building the topology — the
+				// resolvers need the full set for index lookups, not a stream.
+				assets, errs := runProviders(ctx, selected)
+				collected = make([]core.Asset, 0, 1024)
+				errsDone := make(chan struct{})
+				go func() {
+					for e := range errs {
+						if e != nil {
+							provErrs = append(provErrs, e)
+						}
+					}
+					close(errsDone)
+				}()
+				for a := range assets {
+					collected = append(collected, a)
+				}
+				<-errsDone
 			}
-			<-errsDone
 
 			topo := topology.Build(collected)
 			if len(hostnames) > 0 {
@@ -112,6 +130,8 @@ Examples:
 
 	cmd.Flags().StringSlice("provider", nil,
 		`providers to run (default: all registered; use "none" to run zero)`)
+	cmd.Flags().String("from", "",
+		"build the graph from a saved 'audit -o json' snapshot instead of running a live audit")
 	cmd.Flags().StringP("output", "o", "json", "output format: json|dot|mermaid|excalidraw|html")
 	cmd.Flags().String("output-file", "", "write output to this file instead of stdout")
 	cmd.Flags().StringSlice("hostname", nil, "trace only these hostnames (default: all)")
