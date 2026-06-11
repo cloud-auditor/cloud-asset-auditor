@@ -42,8 +42,8 @@ func (p *Provider) workerScriptToAsset(accountID string, s workers.Script) core.
 	// back to the deprecated top-level field older API responses still set.
 	if s.Placement.Mode != "" {
 		tags["placement_mode"] = string(s.Placement.Mode)
-	} else if s.PlacementMode != "" {
-		tags["placement_mode"] = string(s.PlacementMode)
+	} else if s.PlacementMode != "" { //nolint:staticcheck // deprecated field is still the only one set in older API responses
+		tags["placement_mode"] = string(s.PlacementMode) //nolint:staticcheck // see above
 	}
 	return core.Asset{
 		Provider:  providerName,
