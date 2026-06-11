@@ -162,6 +162,47 @@ invariant 5.
 
 ---
 
+## `auditor topology`
+
+Run an audit, infer the request-path graph, and render it.
+`--include-raw` is forced on internally (the Kubernetes resolvers parse
+Ingress / HTTPRoute payloads); the rendered output omits `raw`.
+
+| Flag                    | Default        | Notes |
+| ----------------------- | -------------- | ----- |
+| `--provider strings`    | (all)          | Comma-separated subset |
+| `-o`, `--output string` | `json`         | `json`, `dot`, `mermaid`, `excalidraw` |
+| `--output-file string`  | stdout         | `-` is treated as stdout |
+| `--hostname strings`    | (all)          | Trace only the connected component(s) reachable from these DNS hostnames |
+| `--include-orphans`     | `false`        | Keep asset nodes that have no edges |
+| `--max-concurrency int` | `5`            | Mirrors `audit --max-concurrency` |
+| `--timeout duration`    | `10m`          | Overall audit + resolve timeout |
+
+Provider knobs (`--oci-profile`, `--oci-regions`, `--kube-*`) mirror
+`auditor audit`.
+
+---
+
+## `auditor diff`
+
+Compare two audit snapshots (`auditor audit -o json`, array or NDJSON —
+sniffed automatically) and report drift. Asset identity is
+`(provider, id)`; `Raw` and `CreatedAt` are excluded from comparison.
+
+```bash
+auditor diff old.json new.json
+auditor diff -o markdown old.json new.json   # paste into a PR
+auditor diff --exit-code old.json new.json   # CI gate
+```
+
+| Flag                    | Default  | Notes |
+| ----------------------- | -------- | ----- |
+| `-o`, `--output string` | `table`  | `table`, `json`, `markdown` |
+| `--output-file string`  | stdout   | `-` is treated as stdout |
+| `--exit-code`           | `false`  | Exit `1` when any drift is found, `0` when clean (mirrors `git diff --exit-code`) |
+
+---
+
 ## `auditor serve`
 
 Run the embedded web UI + JSON/SSE API.
