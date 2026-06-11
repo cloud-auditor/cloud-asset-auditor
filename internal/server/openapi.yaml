@@ -242,7 +242,7 @@ paths:
           description: Output format. `json` returns the envelope below; others return a downloadable rendering.
           schema:
             type: string
-            enum: [json, dot, mermaid, excalidraw]
+            enum: [json, dot, mermaid, excalidraw, html]
             default: json
       responses:
         "200":
@@ -258,6 +258,10 @@ paths:
               schema:
                 type: string
                 description: Used by the `mermaid` format
+            text/html:
+              schema:
+                type: string
+                description: Used by the `html` format — a self-contained interactive viewer page
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -293,7 +297,7 @@ paths:
           description: Output format. `json` returns the envelope below; others return a downloadable rendering.
           schema:
             type: string
-            enum: [json, dot, mermaid, excalidraw]
+            enum: [json, dot, mermaid, excalidraw, html]
             default: json
       requestBody:
         required: true
@@ -328,6 +332,10 @@ paths:
               schema:
                 type: string
                 description: Used by the `mermaid` format
+            text/html:
+              schema:
+                type: string
+                description: Used by the `html` format — a self-contained interactive viewer page
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":

@@ -10,8 +10,9 @@ import (
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
 )
 
-// Renderer writes a Topology to w in one of the three supported formats.
-// The CLI selects by --output={json|dot|mermaid}; the server only emits json.
+// Renderer writes a Topology to w in one of the supported formats. The CLI
+// selects by --output={json|dot|mermaid|excalidraw|html}; the server serves
+// json directly and routes the rest through here as downloads.
 type Renderer interface {
 	Render(t *Topology, w io.Writer) error
 }
@@ -28,8 +29,10 @@ func New(format string) (Renderer, error) {
 		return &mermaidRenderer{}, nil
 	case "excalidraw":
 		return &excalidrawRenderer{}, nil
+	case "html":
+		return &htmlRenderer{}, nil
 	default:
-		return nil, fmt.Errorf("unknown topology format %q (want json|dot|mermaid|excalidraw)", format)
+		return nil, fmt.Errorf("unknown topology format %q (want json|dot|mermaid|excalidraw|html)", format)
 	}
 }
 

@@ -27,11 +27,11 @@ import (
 //	hostname=api.example.com          repeatable; filters to connected component
 //	include-orphans=true              keep nodes with no edges
 //	timeout=10m                       audit timeout
-//	format=json|dot|mermaid|excalidraw   default json
+//	format=json|dot|mermaid|excalidraw|html   default json
 //
-// dot / mermaid / excalidraw responses come back as attachments with a
-// sensible filename so dragging the URL into a file manager (or letting
-// curl follow Content-Disposition) saves something openable.
+// dot / mermaid / excalidraw / html responses come back as attachments
+// with a sensible filename so dragging the URL into a file manager (or
+// letting curl follow Content-Disposition) saves something openable.
 func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	providers := parseProvidersParam(q.Get("providers"))
@@ -225,6 +225,8 @@ func topologyContentType(format string) (contentType, filename string) {
 		return "text/plain; charset=utf-8", "topology.mmd"
 	case "excalidraw":
 		return "application/json", "topology.excalidraw"
+	case "html":
+		return "text/html; charset=utf-8", "topology.html"
 	default:
 		return "application/json", "topology.json"
 	}
