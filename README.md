@@ -299,6 +299,38 @@ The action downloads the matching release tarball (pinned by the action
 ref, with a fallback to the latest release when the ref isn't a semver
 tag), runs the audit, and uploads the output as a workflow artifact.
 
+It can also gate on **drift**: pass `baseline` (a previous snapshot) and
+the action runs `auditor diff` against the fresh output, appends a
+markdown report to the job's step summary, and exposes `drift` /
+`drift-summary` outputs. A missing baseline file is warn-and-skip, so
+the first run never fails. Scheduled-drift example with `actions/cache`
+persisting the snapshot between runs:
+
+```yaml
+on:
+  schedule: [{ cron: "0 6 * * *" }]
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@v4
+        with:
+          path: baseline.json
+          key: asset-baseline-${{ github.run_id }}
+          restore-keys: asset-baseline-     # newest previous run
+      - uses: cloud-auditor/cloud-asset-auditor/.github/actions/audit@v0
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        with:
+          output-file: assets.json
+          baseline: baseline.json
+          fail-on-drift: "true"             # fail the job when assets changed
+      - name: Promote snapshot to next run's baseline
+        if: always()
+        run: cp assets.json baseline.json
+```
+
 Minimum permissions for what's implemented today:
 
 - **Cloudflare**: API token with **Zone:Read** + **Zone.DNS:Read** at the account level.

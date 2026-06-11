@@ -34,6 +34,19 @@ inputs:
     description: "Name for the uploaded artifact (when upload-artifact is true)."
     required: false
     default: "cloud-asset-audit"
+  baseline:
+    description: >
+      Path to a previous audit snapshot (json or ndjson). When set and the
+      file exists, the action runs `auditor diff` against the fresh output,
+      appends a markdown drift report to the step summary, and exposes the
+      `drift` / `drift-summary` outputs. Missing file = warn and skip, so
+      the first run of a workflow doesn't fail.
+    required: false
+    default: ""
+  fail-on-drift:
+    description: 'Fail the step when drift is detected vs the baseline ("true"|"false").'
+    required: false
+    default: "false"
 
 outputs:
   asset-count:
@@ -42,6 +55,12 @@ outputs:
   output-path:
     description: "Absolute path to the output file."
     value: ${{ steps.run.outputs.path }}
+  drift:
+    description: 'Whether assets drifted vs the baseline ("true"/"false"; empty when drift detection was skipped).'
+    value: ${{ steps.drift.outputs.drift }}
+  drift-summary:
+    description: "Markdown drift report (empty when drift detection was skipped)."
+    value: ${{ steps.drift.outputs.summary }}
 
 runs:
   using: "composite"
@@ -131,6 +150,59 @@ runs:
         echo "count=$COUNT" >> "$GITHUB_OUTPUT"
         echo "path=$(realpath "$OUTPUT_FILE")" >> "$GITHUB_OUTPUT"
         echo "Collected $COUNT assets → $OUTPUT_FILE"
+
+    - name: Detect drift vs baseline
+      id: drift
+      if: inputs.baseline != ''
+      shell: bash
+      env:
+        BASELINE: ${{ inputs.baseline }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+        OUTPUT_FORMAT: ${{ inputs.output-format }}
+        FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
+      run: |
+        set -euo pipefail
+        if [ "$OUTPUT_FORMAT" = "csv" ]; then
+          echo "::warning::drift detection needs json or ndjson output; skipping (output-format=$OUTPUT_FORMAT)"
+          echo "drift=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [ ! -f "$BASELINE" ]; then
+          echo "::warning::baseline $BASELINE not found — skipping drift detection (first run?)"
+          echo "drift=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Two passes so a hard failure (unparseable file) is distinguishable
+        # from "drift found": the json pass fails the step on real errors,
+        # then jq decides drift, then the markdown pass renders the report.
+        "$RUNNER_TEMP/auditor" diff -o json --output-file drift.json "$BASELINE" "$OUTPUT_FILE"
+        CHANGES=$(jq '.summary.added + .summary.removed + .summary.changed' drift.json)
+        "$RUNNER_TEMP/auditor" diff -o markdown --output-file drift.md "$BASELINE" "$OUTPUT_FILE"
+
+        if [ "$CHANGES" -gt 0 ]; then
+          echo "drift=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "drift=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        {
+          echo "## Asset drift"
+          echo
+          cat drift.md
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        DELIM="DRIFT_EOF_$(date +%s)_$RANDOM"
+        {
+          echo "summary<<$DELIM"
+          cat drift.md
+          echo "$DELIM"
+        } >> "$GITHUB_OUTPUT"
+
+        if [ "$CHANGES" -gt 0 ] && [ "$FAIL_ON_DRIFT" = "true" ]; then
+          echo "::error::asset drift detected vs $BASELINE ($CHANGES change(s); fail-on-drift enabled)"
+          exit 1
+        fi
 
     - name: Upload artifact
       if: inputs.upload-artifact == 'true'
