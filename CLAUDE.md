@@ -33,11 +33,14 @@ Each phase from the plan lives in one place:
 
 Four cross-cutting subsystems were added **after** the plan (issues #2–#4) and belong to no phase: `internal/logging/` (slog), `internal/telemetry/` (OpenTelemetry tracing), `internal/metrics/` (Prometheus), and `internal/version/` (ldflags-injected `Version`/`Commit`/`Date`, surfaced by `auditor version`). The first three are detailed under **Observability** in the Architecture section below.
 
-The three top-level CLI command shapes:
+Post-plan additions also include `internal/diff/` + `internal/cli/diff.go` (the `auditor diff` drift-detection command) and `internal/output/html.go` (the `-o html` report renderer).
 
-- `auditor audit` — runs providers, streams `Asset`s to `internal/output` renderers (JSON / CSV / XLSX). XLSX adds `--sheet-by` (none|provider|type|region|account|tag:KEY, or several `+`-joined) to split assets across worksheets — e.g. `--sheet-by tag:compartment_id` for one sheet per OCI compartment, or `--sheet-by region+tag:compartment_id` for one sheet per region/compartment labelled `region (compartment)` — and `--summary` to prepend a Summary worksheet (totals + per-sheet/per-type counts, each per-sheet row hyperlinked). Kubernetes adds `--kube-exclude-helm-secrets` to drop Helm v3 release-state Secrets (`type helm.sh/release.v1`).
-- `auditor serve` — embedded SPA + `/api/v1/{providers,audit,audit/export,topology,openapi.yaml}` with optional basic/token auth, plus always-open infra endpoints `/healthz` and `/metrics` (Prometheus) that sit **outside** the `/api/v1` namespace.
+The four top-level CLI command shapes:
+
+- `auditor audit` — runs providers, streams `Asset`s to `internal/output` renderers (JSON / CSV / XLSX / HTML report). XLSX adds `--sheet-by` (none|provider|type|region|account|tag:KEY, or several `+`-joined) to split assets across worksheets — e.g. `--sheet-by tag:compartment_id` for one sheet per OCI compartment, or `--sheet-by region+tag:compartment_id` for one sheet per region/compartment labelled `region (compartment)` — and `--summary` to prepend a Summary worksheet (totals + per-sheet/per-type counts, each per-sheet row hyperlinked). Kubernetes adds `--kube-exclude-helm-secrets` to drop Helm v3 release-state Secrets (`type helm.sh/release.v1`).
+- `auditor serve` — embedded SPA (three tabs: **Assets** streamed table, **Topology** interactive force-directed diagram in hand-rolled SVG with a `#demo` hash mode, **Dashboard** live charts) + `/api/v1/{providers,audit,audit/export,topology,openapi.yaml}` with optional basic/token auth, plus always-open infra endpoints `/healthz` and `/metrics` (Prometheus) that sit **outside** the `/api/v1` namespace. `/api/v1/topology` exists in two verbs: GET runs a fresh raw-bearing audit; POST builds the graph from assets in the request body (bare array or `{"assets":[...]}`, 128 MiB cap) — that's what the UI's "From streamed assets" button calls.
 - `auditor topology` — runs an audit, builds a derived `Topology = {Nodes, Edges}` via `internal/topology` resolvers, renders to JSON / DOT / Mermaid / **Excalidraw**.
+- `auditor diff old.json new.json` — drift detection between two `audit -o json` snapshots (array or NDJSON, sniffed). Identity = (provider, id); compares Name/Type/Region/AccountID/Status/Tags only. `-o table|json|markdown`, `--exit-code` exits 1 on drift via an `ErrDrift` sentinel through `Execute()`'s error mapping. Pure logic + renderers live in `internal/diff` (testable); the cobra glue in `internal/cli/diff.go` takes no `cliState`.
 
 ## Architecture (from `init-plan.md` §2)
 
@@ -82,7 +85,7 @@ Renderer outputs are **deterministic** (sorted nodes/edges, FNV-hashed Excalidra
 
 Apply to every commit, every provider, every renderer:
 
-1. **Stream end-to-end.** Never buffer the full asset list. (Sole documented exception: the XLSX renderer, which *must* buffer — an `.xlsx` ZIP is finalized at close and its sheets/columns depend on the full set. JSON/CSV stay streaming.)
+1. **Stream end-to-end.** Never buffer the full asset list. (Two documented exceptions: the XLSX renderer — an `.xlsx` ZIP is finalized at close and its sheets/columns depend on the full set — and the HTML report renderer, whose charts/counts need the full set. JSON/CSV stay streaming.)
 2. **Plumb `context.Context` through every SDK call.** Ctrl+C must stop work in <1 s.
 3. **`log/slog` to stderr only.** stdout is reserved for renderer output when `--output-file` is unset.
 4. **Never log secrets.** Use a redaction helper at every error-wrapping site.
@@ -133,7 +136,7 @@ Things that broke at some point and have lasting "don't undo this" notes — pre
 1. **Do not call `viper.SetConfigType("yaml")` in `internal/config/config.go`.** Viper's `searchInPath` has a special branch when `configType` is set: it also matches the **extensionless** filename. CI builds the binary as `./auditor` in the workspace root, which then matches; viper tries to parse the ELF bytes as YAML and explodes ("yaml: control characters are not allowed"). Caught in commit `be5350f`; regression test in `internal/config/config_test.go::TestInit_IgnoresExtensionlessAuditorFile`.
 2. **Do not pin `golangci-lint-action@v6 latest`** in CI — see Linting section above. Use `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest` instead.
 3. **Do not pin `cloudflare-go/v2`** (despite what `init-plan.md §3` Phase 2 says). It's been superseded by `v4`. The v4 API uses `cloudflare.F(value)` to wrap required params and `AutoPager` for iteration.
-4. **Do not vendor Cytoscape.js / Alpine.js / any third-party JS** into `internal/server/web/`. The Phase 5 + Phase 10 deviations are deliberate: keep the binary fully self-contained. The Topology page uses DOT/Mermaid/Excalidraw exports instead of an in-browser graph view.
+4. **Do not vendor Cytoscape.js / Alpine.js / any third-party JS** into `internal/server/web/`. The Phase 5 + Phase 10 deviations are deliberate: keep the binary fully self-contained. The web UI's Topology tab IS an in-browser graph view — but it's a hand-rolled force-directed SVG renderer (`web/topology.js`), not a vendored library, and it must stay that way. Same for the Dashboard charts (`web/charts.js`).
 5. **Do not add new top-level fields to `core.Asset`.** Put provider-specific richness in `Asset.Raw` (opt-in via `--include-raw`). Adding fields breaks the renderer's golden files and the JSON API contract.
 6. **Do not re-pin the Trivy GitHub Action in `docker.yml`.** Trivy is installed from its upstream `install.sh` script on purpose (commit `abebd60`) — a pinned marketplace action drifts out of sync with the Go toolchain the same way `golangci-lint-action` and the gosec image did (mistakes 2 above).
 7. **Keep `internal/server/openapi.yaml` in sync with `routes()`.** The spec is hand-maintained; `TestOpenAPI_EveryDocumentedPathHasAHandler` only checks documented→handler, so a newly added handler that you forget to document will pass CI but leave the spec lying. And don't auth-gate `/metrics`, `/healthz`, or `/api/v1/openapi.yaml` — they're deliberately exempt.
@@ -145,7 +148,7 @@ Each was a deliberate choice; the rationale matters when revisiting:
 - **Phase 2 SDK**: `cloudflare-go/v4` instead of plan's `v2` (`v2` was an early-access generated SDK that's been superseded).
 - **Phase 5 frontend**: vanilla JS, not Alpine.js (self-contained binary; smaller payload; simpler review surface). Same feature set: SSE streaming, sort, filter, provider/type facets, CSV/JSON export, sticky header. Lives in `internal/server/web/` (plan put `web/` at the repo root; embedded assets are conventionally placed inside the package that uses them in Go).
 - **Phase 6 image size**: ~75 MB, not the plan's `<30 MB` target. Cloudflare v4 + OCI v65 (70+ service packages) + k8s client-go push the static binary to ~73 MB before distroless adds ~2 MB. Hitting <30 MB would require ripping out provider SDKs or a build-tag pruning scheme that doesn't exist upstream.
-- **Phase 10 UI**: no interactive Cytoscape.js tab; instead, CLI + JSON API with four renderers (JSON / DOT / Mermaid / Excalidraw). The Excalidraw export is the practical "editable canvas" — pipe `auditor topology -o excalidraw > topology.excalidraw`, drop into excalidraw.com or the desktop app, edit by hand. Arrows are bound to nodes so rearranging keeps them attached.
+- **Phase 10 UI**: no Cytoscape.js; the web UI's Topology tab is a hand-rolled force-directed SVG viewer (`web/topology.js` — deterministic physics, pan/zoom/drag, details panel, `#demo` mode), alongside CLI + JSON API renderers (JSON / DOT / Mermaid / Excalidraw). The Excalidraw export is the practical "editable canvas" — pipe `auditor topology -o excalidraw > topology.excalidraw`, drop into excalidraw.com or the desktop app, edit by hand. Arrows are bound to nodes so rearranging keeps them attached.
 
 ## Testing strategy
 
@@ -166,17 +169,19 @@ Coverage snapshot (from latest `just test`):
 
 | Package                              | Coverage |
 | ------------------------------------ | -------- |
+| `internal/diff`                      | ~95%     |
 | `internal/logging`                   | ~95%     |
 | `internal/core`                      | ~94%     |
 | `internal/config`                    | ~93%     |
 | `internal/topology`                  | ~89%     |
-| `internal/output`                    | ~82%     |
+| `internal/output`                    | ~89%     |
 | `internal/telemetry`                 | ~78%     |
 | `internal/metrics`                   | ~75%     |
-| `internal/server`                    | ~63%     |
-| `internal/providers/kubernetes`      | ~47%     |
+| `internal/server`                    | ~70%     |
+| `internal/providers/kubernetes`      | ~49%     |
+| `internal/providers/cloudflare`      | ~33%     |
 | `internal/providers/oci`             | ~19%     |
-| `internal/providers/cloudflare`      | ~20%     |
+| `internal/cli`                       | ~5% (cobra glue; renderers tested via internal/diff and internal/output) |
 | `internal/version`                   | 0% (ldflags only, no tests) |
 
 Provider coverage is intentionally lower because most of the code is SDK glue; the mapping bits are well-covered, the network bits wait for integration tests.

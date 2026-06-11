@@ -1,8 +1,10 @@
 # cloud-asset-auditor
 
-Single-binary CLI (and, eventually, web UI) that inventories cloud assets
-across OCI, Cloudflare, and Kubernetes into one canonical schema, with
-JSON, CSV, or Excel (XLSX) output.
+Single-binary CLI + web UI that inventories cloud assets across OCI,
+Cloudflare, and Kubernetes into one canonical schema — JSON, CSV, Excel
+(XLSX), or a self-contained HTML report — with an inferred network
+topology graph, an interactive in-browser diagram, live dashboards,
+and snapshot drift detection (`auditor diff`).
 
 > **All phases shipped.** Foundation, JSON / CSV / XLSX renderers, CLI, three
 > providers (Cloudflare zones+DNS / OCI all resource types /
@@ -98,6 +100,22 @@ vars / config files as the CLI); the browser never receives them. The
 frontend can pick which registered providers to run but cannot supply
 new credentials.
 
+The SPA has three tabs (all hand-rolled vanilla JS — no third-party
+code, no build step):
+
+- **Assets** — provider checkboxes, live SSE-streamed table with
+  filter / sort / type+provider facets, exports (CSV / JSON / XLSX /
+  HTML report).
+- **Topology** — interactive force-directed network diagram: pan /
+  zoom / drag, details panel with in/out edges, provider + edge-kind
+  legend, hostname filter, exports (JSON / DOT / Mermaid /
+  Excalidraw). Two build paths: a fresh raw-bearing audit, or an
+  instant graph from the assets already streamed on the Assets tab.
+  Open `/#demo` for a synthetic preview that needs no credentials.
+- **Dashboard** — live charts that update while the audit streams:
+  provider donut, top-15 type / region / account bars, stat pills;
+  segments click through to the filtered Assets view.
+
 ```bash
 ./bin/auditor serve                                   # → http://localhost:8080, auth=none
 ./bin/auditor serve --addr 127.0.0.1:9090 --auth basic
@@ -110,11 +128,15 @@ Endpoints:
 
 | Path                                  | Purpose                                                                                          |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `GET /`                               | Embedded SPA — provider checkboxes, "Run audit" button, streamed table, filter / sort / facets   |
+| `GET /`                               | Embedded SPA (Assets / Topology / Dashboard tabs)                                                |
 | `GET /healthz`                        | Liveness — always 200, always open (load-balancer probes don't need auth)                        |
+| `GET /metrics`                        | Prometheus metrics — always open (scraper semantics)                                             |
+| `GET /api/v1/openapi.yaml`            | OpenAPI 3.1 spec for everything under `/api/v1` — auth-exempt                                    |
 | `GET /api/v1/providers`               | `{providers: [...], auth_mode: "..."}`                                                           |
 | `GET /api/v1/audit?providers=a,b`     | SSE stream: `meta` → `asset`* → `done`. Optional `init_error` / `error` events interleaved       |
-| `GET /api/v1/audit/export?format=csv` | Synchronous download of CSV / JSON / NDJSON — same bytes the CLI emits                           |
+| `GET /api/v1/audit/export?format=csv` | Synchronous download — `json` / `ndjson` / `csv` / `html` (report) / `xlsx`                      |
+| `GET /api/v1/topology`                | Runs an audit, returns the inferred graph (`?format=json\|dot\|mermaid\|excalidraw`)             |
+| `POST /api/v1/topology`               | Same graph engine, but builds from assets in the request body — no audit, instant                |
 
 Production deployments should sit behind a real reverse proxy (TLS
 termination, rate-limiting, IP allowlist). Built-in `basic` / `token`
@@ -227,8 +249,32 @@ The rendered output omits `raw` to stay readable.
 
 The Cytoscape.js interactive view init-plan.md §3 Phase 10 envisioned
 is deliberately not vendored — same rationale as the vanilla-JS
-frontend choice in Phase 5. The JSON endpoint exists precisely so an
-out-of-tree dashboard can build whatever interactive view it wants.
+frontend choice in Phase 5. Instead, the web UI's **Topology tab**
+renders an interactive force-directed diagram with hand-rolled SVG
+(pan / zoom / drag / details panel), and the JSON endpoint exists so
+an out-of-tree dashboard can build whatever view it wants on top.
+
+## Drift detection
+
+`auditor diff` compares two audit snapshots (`audit -o json`, array or
+NDJSON) and reports what was added, removed, or changed — per-field,
+including individual tags:
+
+```bash
+auditor audit -o json > monday.json
+# ... a week passes ...
+auditor audit -o json > friday.json
+
+auditor diff monday.json friday.json                  # human table
+auditor diff -o markdown monday.json friday.json      # paste into a PR / issue
+auditor diff -o json monday.json friday.json | jq .summary
+
+# CI gate: exit 1 when anything drifted (mirrors `git diff --exit-code`).
+auditor diff --exit-code monday.json friday.json
+```
+
+Identity is `(provider, id)`; `Raw` and `CreatedAt` are deliberately
+excluded from comparison (opt-in noise / immutable-ish).
 
 ### Reusable composite action
 
@@ -342,7 +388,7 @@ A full extending guide ships in Phase 9.
 | 2 — Cloudflare provider     | shipped  | Accounts, Zones, DNS, R2, KV, Workers, D1, Pages, Access apps, Tunnels, certificate packs / custom / mTLS certificates, Rulesets (account + zone), Page Rules, Load Balancers — every planned resource type implemented |
 | 3 — OCI provider            | shipped  | Compartment recursion + region resolution + Compute, Load Balancers, Block / Boot volumes, VCNs, Subnets, Object Storage, Autonomous DBs, DB Systems, Functions, Container Instances, OKE, Vaults, Policies, Users, Groups, Dynamic Groups |
 | 4 — Kubernetes provider     | shipped  | Dynamic-client + discovery — every built-in resource type and every CRD with no per-resource code. `--kube-context`, `--kube-namespace`, `--kube-exclude-namespaces` honored; per-GVR Forbidden tolerated; aggregated-API discovery failures degrade to warnings |
-| 5 — Web UI                  | shipped  | Embedded SPA + JSON/SSE API. `auditor serve --addr ... --auth none\|basic\|token`. Streamed asset table, filter / sort / type+provider facets, CSV/JSON export, graceful shutdown. Plain JS rather than the planned Alpine.js — keeps the binary fully self-contained |
+| 5 — Web UI                  | shipped  | Embedded SPA + JSON/SSE API. `auditor serve --addr ... --auth none\|basic\|token`. Three tabs: streamed asset table (filter / sort / facets, CSV/JSON/XLSX/HTML export), interactive force-directed topology diagram, live charts dashboard. Plain JS rather than the planned Alpine.js — keeps the binary fully self-contained |
 | 6 — Docker                  | shipped  | Multi-stage build → `gcr.io/distroless/static-debian12:nonroot`. Non-root (UID 65532), reproducible-ish (`-trimpath`, ldflags-injected version), accepts `--platform` for multi-arch. ~75 MB rather than the plan's <30 MB target (cloudflare-go/v4 + oci-go-sdk/v65 + k8s client-go are large) |
 | 7 — Helm chart              | shipped  | `deploy/helm/cloud-asset-auditor/` — CronJob (default, optional PVC for persisted output) and Deployment (Service + optional Ingress) modes. BYO credentials Secret (`existingSecret`). Read-only `get,list` ClusterRole (overridable). Example values for both modes |
 | 8 — GitHub Actions          | shipped  | `ci.yml` (test + lint + gosec + helm lint + smoke), `release.yml` (goreleaser cross-build + cosign keyless + SBOM), `docker.yml` (multi-arch GHCR push + cosign image sign + Trivy SARIF), reusable `actions/audit` composite |
