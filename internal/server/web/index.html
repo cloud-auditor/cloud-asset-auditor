@@ -14,62 +14,119 @@
   <span id="health-pill" class="pill pill-muted">checking…</span>
 </header>
 
-<section class="bar bar-controls">
-  <fieldset id="providers-fs">
-    <legend>Providers</legend>
-    <div id="providers-list"><span class="muted">loading…</span></div>
-  </fieldset>
+<nav class="tabs">
+  <button id="tab-assets"   class="tab active" type="button" data-view="view-assets">Assets</button>
+  <button id="tab-topology" class="tab"        type="button" data-view="view-topology">Topology</button>
+</nav>
 
-  <div class="action-group">
-    <button id="run-btn" type="button">Run audit</button>
-    <button id="stop-btn" type="button" hidden>Stop</button>
+<div id="view-assets" class="view">
+
+  <section class="bar bar-controls">
+    <fieldset id="providers-fs">
+      <legend>Providers</legend>
+      <div id="providers-list"><span class="muted">loading…</span></div>
+    </fieldset>
+
+    <div class="action-group">
+      <button id="run-btn" type="button">Run audit</button>
+      <button id="stop-btn" type="button" hidden>Stop</button>
+    </div>
+
+    <div class="grow"></div>
+
+    <div class="action-group">
+      <button id="export-csv-btn" type="button">Export CSV</button>
+      <button id="export-json-btn" type="button">Export JSON</button>
+    </div>
+  </section>
+
+  <section class="bar bar-status">
+    <span id="status">Idle.</span>
+    <div class="grow"></div>
+    <input id="filter" type="search" placeholder="filter assets (substring match across all columns)…" />
+  </section>
+
+  <section class="layout">
+    <aside id="facets" class="facets">
+      <h2>Type</h2>
+      <ul id="facet-types" class="facet-list"></ul>
+      <h2>Provider</h2>
+      <ul id="facet-providers" class="facet-list"></ul>
+    </aside>
+
+    <div class="table-wrap">
+      <table id="assets">
+        <thead>
+          <tr>
+            <th data-key="provider"  >Provider</th>
+            <th data-key="type"      >Type</th>
+            <th data-key="account_id">Account</th>
+            <th data-key="region"    >Region</th>
+            <th data-key="name"      >Name</th>
+            <th data-key="status"    >Status</th>
+            <th data-key="id"        >ID</th>
+          </tr>
+        </thead>
+        <tbody id="assets-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="errors" class="errors" hidden>
+    <h2>Errors</h2>
+    <ul id="errors-list"></ul>
+  </section>
+
+</div>
+
+<div id="view-topology" class="view" hidden>
+
+  <section class="bar bar-controls">
+    <div class="action-group">
+      <button id="topo-build-btn" type="button">Build graph</button>
+      <button id="topo-build-assets-btn" type="button" title="Build instantly from the assets already streamed on the Assets tab — no second audit">From streamed assets</button>
+      <button id="topo-cancel-btn" type="button" hidden>Cancel</button>
+    </div>
+
+    <label class="topo-orphans-label" for="topo-orphans">
+      <input id="topo-orphans" type="checkbox" /> include orphans
+    </label>
+
+    <span id="topo-status">Idle.</span>
+
+    <div class="grow"></div>
+
+    <div class="action-group">
+      <button id="topo-fit-btn" type="button">Fit</button>
+      <button id="topo-relayout-btn" type="button">Re-layout</button>
+    </div>
+
+    <fieldset>
+      <legend>Export</legend>
+      <div class="action-group">
+        <button id="topo-export-json" type="button">JSON</button>
+        <button id="topo-export-dot" type="button">DOT</button>
+        <button id="topo-export-mermaid" type="button">Mermaid</button>
+        <button id="topo-export-excalidraw" type="button">Excalidraw</button>
+      </div>
+    </fieldset>
+  </section>
+
+  <div class="topo-stage">
+    <svg id="topo-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="topo-legend" class="topo-legend"></div>
+    <div id="topo-empty" class="topo-empty">Build graph to fetch and render the topology.</div>
+    <aside id="topo-panel" class="topo-panel" aria-label="Asset details"></aside>
   </div>
 
-  <div class="grow"></div>
+  <section id="topo-errors" class="errors" hidden>
+    <h2>Errors</h2>
+    <ul id="topo-errors-list"></ul>
+  </section>
 
-  <div class="action-group">
-    <button id="export-csv-btn" type="button">Export CSV</button>
-    <button id="export-json-btn" type="button">Export JSON</button>
-  </div>
-</section>
-
-<section class="bar bar-status">
-  <span id="status">Idle.</span>
-  <div class="grow"></div>
-  <input id="filter" type="search" placeholder="filter assets (substring match across all columns)…" />
-</section>
-
-<section class="layout">
-  <aside id="facets" class="facets">
-    <h2>Type</h2>
-    <ul id="facet-types" class="facet-list"></ul>
-    <h2>Provider</h2>
-    <ul id="facet-providers" class="facet-list"></ul>
-  </aside>
-
-  <div class="table-wrap">
-    <table id="assets">
-      <thead>
-        <tr>
-          <th data-key="provider"  >Provider</th>
-          <th data-key="type"      >Type</th>
-          <th data-key="account_id">Account</th>
-          <th data-key="region"    >Region</th>
-          <th data-key="name"      >Name</th>
-          <th data-key="status"    >Status</th>
-          <th data-key="id"        >ID</th>
-        </tr>
-      </thead>
-      <tbody id="assets-body"></tbody>
-    </table>
-  </div>
-</section>
-
-<section id="errors" class="errors" hidden>
-  <h2>Errors</h2>
-  <ul id="errors-list"></ul>
-</section>
+</div>
 
 <script src="/app.js"></script>
+<script src="/topology.js"></script>
 </body>
 </html>

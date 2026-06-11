@@ -1,5 +1,8 @@
 // Cloud Asset Auditor — embedded SPA, vanilla JS, no build step.
 //
+// app.js owns the Assets tab (and the tab bar itself); topology.js owns the
+// Topology tab and reads window.auditorShared (defined at the bottom).
+//
 // State machine (intentionally tiny):
 //   idle  ──run──▶ running  ──done/stop/error──▶ idle
 //
@@ -29,6 +32,7 @@ const state = {
 // ---------- bootstrap ----------
 
 async function init() {
+  initTabs();
   checkHealth();
   setInterval(checkHealth, 10_000);
 
@@ -54,6 +58,19 @@ async function init() {
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
+// ---------- tabs ----------
+
+function initTabs() {
+  $$(".tabs .tab").forEach((btn) => btn.addEventListener("click", () => activateTab(btn)));
+}
+
+// Plain show/hide: both views stay in the DOM, so each tab keeps its state
+// (table rows, graph positions, scroll) across switches.
+function activateTab(btn) {
+  $$(".tabs .tab").forEach((b) => b.classList.toggle("active", b === btn));
+  $$(".view").forEach((v) => { v.hidden = v.id !== btn.dataset.view; });
+}
 
 // ---------- health ----------
 
@@ -293,3 +310,15 @@ function addError(msg) {
   ul.appendChild(li);
   $("#errors").hidden = false;
 }
+
+// ---------- shared surface ----------
+//
+// topology.js (the second embedded script) reads the Assets tab's provider
+// selection so "Build graph" targets the same subset as "Run audit".
+// Getters that copy — never the live Set/array — keep the coupling
+// read-only and one-way.
+window.auditorShared = {
+  selectedProviders: () => Array.from(state.selected),
+  allProviders:      () => state.providers.slice(),
+  assets:            () => state.assets.slice(),
+};
