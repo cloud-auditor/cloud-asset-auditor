@@ -55,6 +55,8 @@ async function init() {
   $$("#assets thead th").forEach((th) => th.addEventListener("click", () => sortBy(th.dataset.key)));
   $("#export-csv-btn").addEventListener("click",  () => exportTo("csv"));
   $("#export-json-btn").addEventListener("click", () => exportTo("json"));
+  $("#export-xlsx-btn").addEventListener("click", () => exportTo("xlsx"));
+  $("#export-html-btn").addEventListener("click", () => exportTo("html"));
 }
 
 document.addEventListener("DOMContentLoaded", init);
