@@ -1,7 +1,8 @@
 // Package output renders streams of core.Asset values into one of the
-// supported wire formats (JSON array, NDJSON, CSV). Each renderer drains
-// the input channel incrementally so memory stays bounded regardless of
-// inventory size.
+// supported formats (JSON array, NDJSON, CSV, XLSX, HTML). JSON and CSV
+// drain the input channel incrementally so memory stays bounded regardless
+// of inventory size; XLSX and HTML are the two documented exceptions that
+// must buffer the full set first (see their type comments for why).
 package output
 
 import (
@@ -13,7 +14,8 @@ import (
 
 // Renderer writes a stream of assets to w. Implementations MUST consume the
 // channel incrementally (no full buffering) so audits against very large
-// inventories don't blow up memory.
+// inventories don't blow up memory; XLSX and HTML are the two sanctioned
+// exceptions, buffering because their formats need the full set.
 type Renderer interface {
 	Render(ctx context.Context, in <-chan core.Asset, w io.Writer) error
 }

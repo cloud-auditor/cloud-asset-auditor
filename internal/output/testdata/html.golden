@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloud Asset Audit Report</title>
+<style>
+  /* Visual language mirrors internal/server/web/styles.css so the report
+     reads as the same product as the embedded UI. */
+  :root {
+    --fg: #1f2328;
+    --fg-muted: #57606a;
+    --bg: #ffffff;
+    --bg-muted: #f6f8fa;
+    --border: #d0d7de;
+    --accent: #0969da;
+    --error: #cf222e;
+    --ok: #1a7f37;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: var(--fg); background: var(--bg); }
+
+  header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--bg-muted); }
+  header h1 { margin: 0 0 .2rem; font-size: 1.25rem; font-weight: 600; }
+  header .meta { margin: 0; color: var(--fg-muted); font-size: .85rem; }
+
+  main { max-width: 1400px; margin: 0 auto; padding: 1rem 1.5rem; }
+
+  .cards { display: flex; gap: .8rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
+  .card { flex: 1 1 9rem; min-width: 9rem; border: 1px solid var(--border); border-radius: 6px; padding: .7rem .9rem; }
+  .card .num { font-size: 1.6rem; font-weight: 600; }
+  .card .label { color: var(--fg-muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; }
+
+  .charts { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
+  .chart { margin: 0; flex: 1 1 26rem; min-width: 22rem; border: 1px solid var(--border); border-radius: 6px; padding: .8rem 1rem; }
+  .chart figcaption { font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--fg-muted); margin-bottom: .6rem; }
+  .donut-wrap { display: flex; gap: 1.2rem; align-items: center; flex-wrap: wrap; }
+  .legend { list-style: none; margin: 0; padding: 0; font-size: .85rem; flex: 1; min-width: 10rem; }
+  .legend li { display: flex; align-items: center; gap: .45rem; padding: .12rem 0; }
+  .legend .swatch { width: .75rem; height: .75rem; border-radius: 2px; flex: none; }
+  .legend .count { color: var(--fg-muted); margin-left: auto; padding-left: 1rem; }
+
+  .controls { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin-bottom: .6rem; }
+  input[type="search"] { flex: 1; min-width: 14rem; max-width: 28rem; padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+  select { font: inherit; padding: .3rem .45rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); max-width: 18rem; }
+  #visible-count { color: var(--fg-muted); font-size: .85rem; margin-left: auto; }
+
+  .table-wrap { max-height: 75vh; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { position: sticky; top: 0; background: var(--bg); border-bottom: 2px solid var(--border); padding: .4rem .6rem; text-align: left; cursor: pointer; white-space: nowrap; }
+  thead th.sort-asc::after  { content: " ▲"; color: var(--accent); }
+  thead th.sort-desc::after { content: " ▼"; color: var(--accent); }
+  tbody td { padding: .35rem .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:hover { background: var(--bg-muted); }
+  td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+  .chip { display: inline-block; font-size: .75rem; line-height: 1.4; padding: .05rem .45rem; margin: 0 .25rem .25rem 0; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-muted); white-space: nowrap; }
+  button.chip { font-family: inherit; color: var(--accent); cursor: pointer; }
+  button.chip:hover { background: var(--bg); }
+  td.tags .chip.extra { display: none; }
+  td.tags.expanded .chip.extra { display: inline-block; }
+
+  .muted { color: var(--fg-muted); font-style: italic; }
+  #truncation-note { margin: .5rem 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cloud Asset Audit Report</h1>
+  <p class="meta">Generated 2025-01-02T03:04:05Z &middot; auditor dev &middot; 2 assets</p>
+</header>
+<main>
+  <section class="cards" id="cards"></section>
+
+  <section class="charts" id="charts">
+    <figure class="chart" id="chart-providers">
+      <figcaption>Assets by provider</figcaption>
+      <div class="donut-wrap"></div>
+    </figure>
+    <figure class="chart" id="chart-types">
+      <figcaption>Top asset types</figcaption>
+    </figure>
+    <figure class="chart" id="chart-regions">
+      <figcaption>Assets by region</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="controls">
+      <input type="search" id="filter" placeholder="Filter assets&hellip;">
+      <select id="provider-filter"><option value="">All providers</option></select>
+      <select id="type-filter"><option value="">All types</option></select>
+      <span id="visible-count"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="assets">
+        <thead>
+          <tr>
+            <th data-key="provider">Provider</th>
+            <th data-key="type">Type</th>
+            <th data-key="account_id">Account</th>
+            <th data-key="region">Region</th>
+            <th data-key="name">Name</th>
+            <th data-key="status">Status</th>
+            <th data-key="id">ID</th>
+            <th data-key="tags">Tags</th>
+          </tr>
+        </thead>
+        <tbody id="asset-rows"></tbody>
+      </table>
+    </div>
+    <p id="truncation-note" class="muted" hidden></p>
+  </section>
+</main>
+
+<script id="report-data" type="application/json">{"generated_at":"2025-01-02T03:04:05Z","version":"dev","total":2,"assets":[{"provider":"cloudflare","account_id":"acct1","type":"cloudflare.zone","id":"zone-1","name":"example.com","status":"active","tags":{"env":"prod","team":"platform"}},{"provider":"kubernetes","account_id":"kind-test","region":"local","type":"v1.Pod","id":"uid-2","name":"nginx-abc","status":"Running"}]}</script>
+<script>
+// Everything below runs against the JSON payload above — no fetches, no
+// third-party libraries — so the report stays one portable file.
+(() => {
+  "use strict";
+
+  const report = JSON.parse(document.getElementById("report-data").textContent);
+  const assets = report.assets || [];
+
+  const $ = (sel) => document.querySelector(sel);
+  const PALETTE = ["#0969da", "#1a7f37", "#9a6700", "#cf222e", "#8250df", "#bc4c00", "#1b7c83", "#57606a"];
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const MAX_ROWS = 2000;
+  const MAX_CHIPS = 6;
+
+  const svgEl = (tag, attrs) => {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  };
+
+  // ---------- aggregates ----------
+
+  // Distinct values of one asset field with counts, biggest first (ties by
+  // name) so charts and dropdowns read top-down. Empty values are skipped —
+  // they'd chart as a blank slice or bar.
+  const countBy = (key) => {
+    const m = new Map();
+    for (const a of assets) {
+      const v = a[key];
+      if (!v) continue;
+      m.set(v, (m.get(v) || 0) + 1);
+    }
+    return Array.from(m, ([name, count]) => ({ name, count }))
+      .sort((x, y) => y.count - x.count || (x.name < y.name ? -1 : 1));
+  };
+
+  const providers = countBy("provider");
+  const types = countBy("type");
+  const regions = countBy("region");
+  const accounts = countBy("account_id");
+
+  // ---------- summary cards ----------
+
+  for (const [label, num] of [
+    ["Total assets", assets.length],
+    ["Providers", providers.length],
+    ["Asset types", types.length],
+    ["Regions", regions.length],
+    ["Accounts", accounts.length],
+  ]) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const n = document.createElement("div");
+    n.className = "num";
+    n.textContent = String(num);
+    const l = document.createElement("div");
+    l.className = "label";
+    l.textContent = label;
+    card.append(n, l);
+    $("#cards").appendChild(card);
+  }
+
+  // ---------- charts (hand-rolled SVG) ----------
+
+  const renderDonut = (items) => {
+    const size = 180, r = 70, c = size / 2, strokeW = 26;
+    const total = items.reduce((s, it) => s + it.count, 0);
+    const circumference = 2 * Math.PI * r;
+    const svg = svgEl("svg", { width: size, height: size, viewBox: `0 0 ${size} ${size}`, role: "img" });
+    let offset = 0;
+    items.forEach((it, i) => {
+      const frac = it.count / total;
+      svg.appendChild(svgEl("circle", {
+        cx: c, cy: c, r: r, fill: "none",
+        stroke: PALETTE[i % PALETTE.length],
+        "stroke-width": strokeW,
+        "stroke-dasharray": `${frac * circumference} ${circumference}`,
+        "stroke-dashoffset": -offset * circumference,
+        transform: `rotate(-90 ${c} ${c})`,
+      }));
+      offset += frac;
+    });
+    const num = svgEl("text", { x: c, y: c - 1, "text-anchor": "middle", "font-size": 24, "font-weight": 600, fill: "#1f2328" });
+    num.textContent = String(total);
+    const sub = svgEl("text", { x: c, y: c + 17, "text-anchor": "middle", "font-size": 11, fill: "#57606a" });
+    sub.textContent = "assets";
+    svg.append(num, sub);
+
+    const legend = document.createElement("ul");
+    legend.className = "legend";
+    items.forEach((it, i) => {
+      const li = document.createElement("li");
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.background = PALETTE[i % PALETTE.length];
+      const name = document.createElement("span");
+      name.textContent = it.name;
+      const count = document.createElement("span");
+      count.className = "count";
+      count.textContent = String(it.count);
+      li.append(swatch, name, count);
+      legend.appendChild(li);
+    });
+    $("#chart-providers .donut-wrap").append(svg, legend);
+  };
+
+  const renderBars = (figure, items) => {
+    const rowH = 22, labelW = 200, valueW = 48, barMax = 380;
+    const max = items[0].count; // items arrive sorted biggest-first
+    const svg = svgEl("svg", {
+      viewBox: `0 0 ${labelW + barMax + valueW} ${items.length * rowH}`,
+      width: "100%", role: "img", preserveAspectRatio: "xMinYMin meet",
+    });
+    items.forEach((it, i) => {
+      const y = i * rowH;
+      const w = Math.max(2, Math.round((it.count / max) * barMax));
+      const label = svgEl("text", { x: labelW - 8, y: y + 15, "text-anchor": "end", "font-size": 12, fill: "#1f2328" });
+      label.textContent = it.name.length > 30 ? it.name.slice(0, 29) + "…" : it.name;
+      const title = svgEl("title", {});
+      title.textContent = it.name;
+      label.appendChild(title);
+      const bar = svgEl("rect", { x: labelW, y: y + 4, width: w, height: rowH - 8, rx: 2, fill: "#0969da" });
+      const value = svgEl("text", { x: labelW + w + 6, y: y + 15, "font-size": 12, fill: "#57606a" });
+      value.textContent = String(it.count);
+      svg.append(label, bar, value);
+    });
+    figure.appendChild(svg);
+  };
+
+  // A chart with nothing to show is dropped wholesale — notably regions:
+  // many inventories are region-less, and an empty axis is just noise.
+  if (providers.length) renderDonut(providers); else $("#chart-providers").remove();
+  if (types.length) renderBars($("#chart-types"), types.slice(0, 15)); else $("#chart-types").remove();
+  if (regions.length) renderBars($("#chart-regions"), regions); else $("#chart-regions").remove();
+
+  // ---------- asset table ----------
+
+  const tagString = (a) =>
+    a.tags ? Object.keys(a.tags).sort().map((k) => `${k}=${a.tags[k]}`).join(";") : "";
+
+  // Precomputed lowercase haystack per asset, so the substring filter doesn't
+  // rebuild strings on every keystroke.
+  const hay = assets.map((a) =>
+    [a.provider, a.type, a.account_id, a.region, a.name, a.status, a.id, tagString(a)].join(" ").toLowerCase());
+
+  const state = { query: "", provider: "", type: "", sortKey: null, sortDir: 1 };
+
+  const fillSelect = (sel, items) => {
+    for (const it of items) {
+      const opt = document.createElement("option");
+      opt.value = it.name;
+      opt.textContent = `${it.name} (${it.count})`;
+      sel.appendChild(opt);
+    }
+  };
+  fillSelect($("#provider-filter"), providers);
+  fillSelect($("#type-filter"), types);
+
+  const tagsCell = (a) => {
+    const td = document.createElement("td");
+    td.className = "tags";
+    const keys = a.tags ? Object.keys(a.tags).sort() : [];
+    keys.forEach((k, i) => {
+      const chip = document.createElement("span");
+      chip.className = i < MAX_CHIPS ? "chip" : "chip extra";
+      chip.textContent = `${k}=${a.tags[k]}`;
+      td.appendChild(chip);
+    });
+    if (keys.length > MAX_CHIPS) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "chip more";
+      const collapsed = `+${keys.length - MAX_CHIPS} more`;
+      more.textContent = collapsed;
+      more.addEventListener("click", () => {
+        more.textContent = td.classList.toggle("expanded") ? "show less" : collapsed;
+      });
+      td.appendChild(more);
+    }
+    return td;
+  };
+
+  const assetRow = (a) => {
+    const tr = document.createElement("tr");
+    for (const k of ["provider", "type", "account_id", "region", "name", "status", "id"]) {
+      const td = document.createElement("td");
+      td.textContent = a[k] || "";
+      if (k === "id") td.className = "mono";
+      tr.appendChild(td);
+    }
+    tr.appendChild(tagsCell(a));
+    return tr;
+  };
+
+  const currentView = () => {
+    const q = state.query;
+    const view = [];
+    for (let i = 0; i < assets.length; i++) {
+      const a = assets[i];
+      if (state.provider && a.provider !== state.provider) continue;
+      if (state.type && a.type !== state.type) continue;
+      if (q && hay[i].indexOf(q) === -1) continue;
+      view.push(a);
+    }
+    if (state.sortKey) {
+      const k = state.sortKey, dir = state.sortDir;
+      view.sort((x, y) => {
+        const xv = (k === "tags" ? tagString(x) : x[k] || "").toLowerCase();
+        const yv = (k === "tags" ? tagString(y) : y[k] || "").toLowerCase();
+        return xv < yv ? -dir : xv > yv ? dir : 0;
+      });
+    }
+    return view;
+  };
+
+  const renderTable = () => {
+    const view = currentView();
+    const tbody = $("#asset-rows");
+    tbody.textContent = "";
+    const frag = document.createDocumentFragment();
+    for (const a of view.slice(0, MAX_ROWS)) frag.appendChild(assetRow(a));
+    tbody.appendChild(frag);
+
+    $("#visible-count").textContent = `${view.length} of ${assets.length} assets`;
+    const note = $("#truncation-note");
+    note.hidden = view.length <= MAX_ROWS;
+    if (!note.hidden) note.textContent = `showing first ${MAX_ROWS} of ${view.length} — refine the filter`;
+  };
+
+  $("#filter").addEventListener("input", (e) => {
+    state.query = e.target.value.trim().toLowerCase();
+    renderTable();
+  });
+  $("#provider-filter").addEventListener("change", (e) => { state.provider = e.target.value; renderTable(); });
+  $("#type-filter").addEventListener("change", (e) => { state.type = e.target.value; renderTable(); });
+
+  document.querySelectorAll("#assets thead th").forEach((th) => {
+    th.addEventListener("click", () => {
+      const k = th.dataset.key;
+      if (state.sortKey === k) {
+        state.sortDir = -state.sortDir;
+      } else {
+        state.sortKey = k;
+        state.sortDir = 1;
+      }
+      document.querySelectorAll("#assets thead th").forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+      th.classList.add(state.sortDir === 1 ? "sort-asc" : "sort-desc");
+      renderTable();
+    });
+  });
+
+  renderTable();
+})();
+</script>
+</body>
+</html>

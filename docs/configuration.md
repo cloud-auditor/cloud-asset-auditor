@@ -127,12 +127,12 @@ spec entry (or vice versa) fails CI.
 
 ## `auditor audit`
 
-Collect assets from one or more providers and render them as JSON, CSV, or XLSX.
+Collect assets from one or more providers and render them as JSON, CSV, XLSX, or a self-contained HTML report.
 
 | Flag                              | Env / config key                     | Default       | Notes |
 | --------------------------------- | ------------------------------------ | ------------- | ----- |
 | `--provider strings`              | `AUDITOR_PROVIDER`                   | (all)         | Comma-separated. Use the literal `none` to run zero providers. |
-| `-o`, `--output string`           | `AUDITOR_OUTPUT`                     | `json`        | `json`, `csv`, or `xlsx` |
+| `-o`, `--output string`           | `AUDITOR_OUTPUT`                     | `json`        | `json`, `csv`, `xlsx`, or `html` (one self-contained report page: summary cards, SVG charts, sortable/filterable asset table — no external requests) |
 | `--output-file string`            | `AUDITOR_OUTPUT_FILE`                | stdout        | `-` is treated as stdout. Required for `xlsx` unless stdout is redirected (it's binary). |
 | `--stream`                        | `AUDITOR_STREAM`                     | `false`       | With `-o json`, emit NDJSON (one object per line) instead of an array |
 | `--sheet-by string`               | `AUDITOR_SHEET_BY`                   | `provider`    | With `-o xlsx`, split worksheets by one or more `+`-joined dimensions: `none\|provider\|type\|region\|account\|tag:KEY` (e.g. `tag:compartment_id`, or `region+tag:compartment_id` for a sheet per region/compartment labelled `region (compartment)`) |

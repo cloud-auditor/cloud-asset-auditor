@@ -104,7 +104,7 @@ func newAuditCmd(s *cliState) *cobra.Command {
 
 	cmd.Flags().StringSlice("provider", nil,
 		`providers to run (e.g. oci,cloudflare,kubernetes; use "none" to run zero; default: all registered)`)
-	cmd.Flags().StringP("output", "o", "json", "output format: json|csv|xlsx")
+	cmd.Flags().StringP("output", "o", "json", "output format: json|csv|xlsx|html")
 	cmd.Flags().String("output-file", "", "write output to this file instead of stdout")
 	cmd.Flags().Bool("stream", false, "with -o json, emit NDJSON (one object per line) instead of an array")
 	cmd.Flags().String("sheet-by", "provider",
@@ -147,8 +147,14 @@ func buildRenderer(format string, stream bool, sheetBy string, summary bool) (ou
 			return nil, err
 		}
 		return r, nil
+	case "html":
+		// Like csv, html ignores the xlsx-only --sheet-by/--summary knobs.
+		if stream {
+			return nil, errors.New("--stream is only meaningful with -o json")
+		}
+		return &output.HTML{}, nil
 	default:
-		return nil, fmt.Errorf("unknown output format %q (supported: json, csv, xlsx)", format)
+		return nil, fmt.Errorf("unknown output format %q (supported: json, csv, xlsx, html)", format)
 	}
 }
 
