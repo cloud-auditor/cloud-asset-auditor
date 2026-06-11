@@ -221,6 +221,12 @@
     const sel = window.auditorShared.selectedProviders();
     if (sel.length > 0 && sel.length < all.length) params.set("providers", sel.join(","));
     if ($("#topo-orphans").checked) params.set("include-orphans", "true");
+    // hostname= is repeatable server-side; a comma-separated input maps to
+    // one param per hostname (FilterByHostname keeps each one's component).
+    for (const h of $("#topo-hostname").value.split(",")) {
+      const v = h.trim();
+      if (v) params.append("hostname", v);
+    }
     return params;
   }
 
@@ -293,8 +299,9 @@
       return;
     }
 
-    const params = new URLSearchParams();
-    if ($("#topo-orphans").checked) params.set("include-orphans", "true");
+    // topoParams includes providers=, which the POST handler ignores —
+    // harmless, and it keeps hostname/orphans handling in one place.
+    const params = topoParams();
     params.set("format", "json");
 
     state.abort = new AbortController();
