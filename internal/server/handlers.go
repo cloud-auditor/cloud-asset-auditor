@@ -160,6 +160,8 @@ func buildExportRenderer(format, sheetBy string, summary bool) (output.Renderer,
 		return &output.JSON{Stream: true}, "application/x-ndjson", nil
 	case "csv":
 		return &output.CSV{}, "text/csv", nil
+	case "html":
+		return &output.HTML{}, "text/html; charset=utf-8", nil
 	case "xlsx":
 		if sheetBy == "" {
 			sheetBy = "provider"
@@ -170,7 +172,7 @@ func buildExportRenderer(format, sheetBy string, summary bool) (output.Renderer,
 		}
 		return r, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", nil
 	default:
-		return nil, "", fmt.Errorf("unknown format %q (want json|ndjson|csv|xlsx)", format)
+		return nil, "", fmt.Errorf("unknown format %q (want json|ndjson|csv|html|xlsx)", format)
 	}
 }
 

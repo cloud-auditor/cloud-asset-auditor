@@ -142,7 +142,7 @@ paths:
           description: Output format
           schema:
             type: string
-            enum: [json, ndjson, csv, xlsx]
+            enum: [json, ndjson, csv, html, xlsx]
             default: json
         - name: sheet_by
           in: query
@@ -191,6 +191,10 @@ paths:
               schema:
                 type: string
                 description: Header row plus one row per Asset; Tags flattened to k1=v1;k2=v2
+            text/html:
+              schema:
+                type: string
+                description: Self-contained audit report (same as `auditor audit -o html`)
             application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
               schema:
                 type: string
