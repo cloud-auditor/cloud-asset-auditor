@@ -235,6 +235,10 @@ auditor topology --hostname api.example.com -o mermaid
 # the Excalidraw desktop app and drag nodes around; arrows stay attached.
 auditor topology -o excalidraw > topology.excalidraw
 
+# Standalone interactive diagram — one self-contained HTML file with the
+# same force-directed viewer the web UI ships; opens offline, shareable.
+auditor topology -o html > topology.html
+
 # Programmatic consumers.
 auditor topology -o json | jq '.edges[] | select(.kind == "lb-backend")'
 

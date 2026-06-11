@@ -171,7 +171,7 @@ Ingress / HTTPRoute payloads); the rendered output omits `raw`.
 | Flag                    | Default        | Notes |
 | ----------------------- | -------------- | ----- |
 | `--provider strings`    | (all)          | Comma-separated subset |
-| `-o`, `--output string` | `json`         | `json`, `dot`, `mermaid`, `excalidraw` |
+| `-o`, `--output string` | `json`         | `json`, `dot`, `mermaid`, `excalidraw`, `html` (standalone interactive force-directed viewer — one self-contained file) |
 | `--output-file string`  | stdout         | `-` is treated as stdout |
 | `--hostname strings`    | (all)          | Trace only the connected component(s) reachable from these DNS hostnames |
 | `--include-orphans`     | `false`        | Keep asset nodes that have no edges |
