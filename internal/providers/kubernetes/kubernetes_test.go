@@ -63,6 +63,11 @@ func TestSetters(t *testing.T) {
 	if !p.cfg.ExcludeHelmSecrets {
 		t.Error("ExcludeHelmSecrets not set")
 	}
+
+	p.SetIncludeRaw(true)
+	if !p.cfg.IncludeRaw {
+		t.Error("IncludeRaw not set")
+	}
 }
 
 func TestIsHelmReleaseSecret(t *testing.T) {
@@ -192,6 +197,57 @@ func TestExtractStatus_NoStatus(t *testing.T) {
 	u := &unstructured.Unstructured{Object: map[string]any{}}
 	if got := extractStatus(u); got != "" {
 		t.Errorf("status should be empty, got %q", got)
+	}
+}
+
+func TestExtractStatus_ConditionFallbacks(t *testing.T) {
+	withConds := func(conds ...any) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"status": map[string]any{"conditions": conds},
+		}}
+	}
+	cases := []struct {
+		name string
+		u    *unstructured.Unstructured
+		want string
+	}{
+		{
+			"available wins over other types",
+			withConds(
+				map[string]any{"type": "Progressing", "status": "True"},
+				map[string]any{"type": "Available", "status": "False"},
+			),
+			"Available=False",
+		},
+		{
+			"first usable non-special condition",
+			withConds(
+				map[string]any{"type": "Initialized", "status": "True"},
+				map[string]any{"type": "PodScheduled", "status": "True"},
+			),
+			"Initialized=True",
+		},
+		{
+			"skips non-map and empty-status entries",
+			withConds(
+				"not-a-map",
+				map[string]any{"type": "Degraded"}, // no status
+				map[string]any{"type": "Synced", "status": "True"},
+			),
+			"Synced=True",
+		},
+		{
+			"all conditions unusable",
+			withConds("junk", map[string]any{"type": "Empty", "status": ""}),
+			"",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := extractStatus(c.u); got != c.want {
+				t.Errorf("extractStatus = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 
@@ -350,8 +406,67 @@ func TestListResource_FiltersExcludedNamespaces(t *testing.T) {
 }
 
 func TestInit_RegistersProvider(t *testing.T) {
-	if _, ok := core.Lookup("kubernetes"); !ok {
+	factory, ok := core.Lookup("kubernetes")
+	if !ok {
 		t.Fatal("kubernetes provider not registered by init()")
+	}
+	p, err := factory()
+	if err != nil {
+		t.Fatalf("factory() error: %v", err)
+	}
+	if p.Name() != "kubernetes" {
+		t.Errorf("factory built provider %q, want kubernetes", p.Name())
+	}
+}
+
+func TestUnstructuredToAsset_TimestampAndRaw(t *testing.T) {
+	created := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
+	withTS := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name":              "prod",
+			"uid":               "ns-uid",
+			"creationTimestamp": created.Format(time.RFC3339),
+		},
+	}}
+	withoutTS := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata":   map[string]any{"name": "staging", "uid": "ns2-uid"},
+	}}
+
+	// IncludeRaw off: Raw must stay nil, CreatedAt parsed when present.
+	p := &Provider{clusterID: "c"}
+	a := p.unstructuredToAsset(withTS)
+	if a.CreatedAt == nil || !a.CreatedAt.Equal(created) {
+		t.Errorf("CreatedAt = %v, want %v", a.CreatedAt, created)
+	}
+	if a.Raw != nil {
+		t.Error("Raw must be nil when IncludeRaw is off")
+	}
+
+	// Missing creationTimestamp: CreatedAt stays nil. Cluster-scoped
+	// object with no labels: Tags stays nil.
+	b := p.unstructuredToAsset(withoutTS)
+	if b.CreatedAt != nil {
+		t.Errorf("CreatedAt = %v, want nil when creationTimestamp absent", b.CreatedAt)
+	}
+	if b.Tags != nil {
+		t.Errorf("Tags = %v, want nil for unlabelled cluster-scoped object", b.Tags)
+	}
+
+	// IncludeRaw on: Raw carries the full object.
+	pRaw := &Provider{clusterID: "c", cfg: Config{IncludeRaw: true}}
+	if r := pRaw.unstructuredToAsset(withTS); r.Raw == nil {
+		t.Error("Raw must be populated when IncludeRaw is on")
+	}
+}
+
+func TestRawOf_MarshalErrorReturnsNil(t *testing.T) {
+	p := &Provider{cfg: Config{IncludeRaw: true}}
+	if got := p.rawOf(make(chan int)); got != nil { // channels can't marshal
+		t.Errorf("rawOf(unmarshalable) = %s, want nil", got)
 	}
 }
 
