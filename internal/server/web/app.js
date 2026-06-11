@@ -120,7 +120,11 @@ function runAudit() {
   });
   es.addEventListener("asset", (e) => {
     state.assets.push(JSON.parse(e.data));
-    rerender({ tableOnly: state.assets.length % 100 !== 0 }); // throttle facet rebuilds
+    // Every 100th asset: rebuild facets AND tell the Dashboard — the same
+    // throttle serves both, so charts stay "live" without a rebuild per row.
+    const cheap = state.assets.length % 100 !== 0;
+    rerender({ tableOnly: cheap });
+    if (!cheap) notifyAssetsChanged();
     setStatus(`${state.assets.length} assets streamed…`);
   });
   es.addEventListener("error", (e) => {
@@ -134,6 +138,7 @@ function runAudit() {
     const elapsed = ((Date.now() - state.startedAt) / 1000).toFixed(1);
     setStatus(`Done. ${o.count} assets in ${elapsed}s` + (o.errors ? ` (${o.errors} errors)` : ""));
     rerender();
+    notifyAssetsChanged(); // always, so the Dashboard lands on the final numbers
     stopAudit();
   });
   es.onerror = () => {
@@ -301,6 +306,15 @@ function sortBy(key) {
 
 // ---------- misc ----------
 
+// Fire-and-forget signal that state.assets changed. charts.js (the Dashboard
+// tab) listens and re-reads window.auditorShared.assets(); carrying no
+// payload keeps the contract one-way and trivially backward compatible.
+// Callers throttle: the SSE handler fires it on the every-100th-asset facet
+// cadence, plus once unconditionally on done.
+function notifyAssetsChanged() {
+  document.dispatchEvent(new CustomEvent("auditor:assets"));
+}
+
 function setStatus(s) { $("#status").textContent = s; }
 
 function addError(msg) {
@@ -317,8 +331,26 @@ function addError(msg) {
 // selection so "Build graph" targets the same subset as "Run audit".
 // Getters that copy — never the live Set/array — keep the coupling
 // read-only and one-way.
+//
+// The two show* functions are the Dashboard's click-through: deliberately
+// tiny, one-way jumps that drive the Assets tab exactly as a user would
+// (facet click / filter keystroke), then switch to it.
 window.auditorShared = {
   selectedProviders: () => Array.from(state.selected),
   allProviders:      () => state.providers.slice(),
   assets:            () => state.assets.slice(),
+
+  // Donut segments and type bars map 1:1 onto the facet rail.
+  showAssetsFacet: (kind, value) => {
+    setFacet(kind, value);
+    activateTab($("#tab-assets"));
+  },
+  // Region/account bars aren't facets — the substring filter is the
+  // closest thing the Assets tab has, so drive it like a keystroke would.
+  showAssetsFiltered: (text) => {
+    $("#filter").value = text;
+    state.filter = text.trim().toLowerCase();
+    rerender();
+    activateTab($("#tab-assets"));
+  },
 };

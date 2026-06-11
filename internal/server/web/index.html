@@ -15,8 +15,9 @@
 </header>
 
 <nav class="tabs">
-  <button id="tab-assets"   class="tab active" type="button" data-view="view-assets">Assets</button>
-  <button id="tab-topology" class="tab"        type="button" data-view="view-topology">Topology</button>
+  <button id="tab-assets"    class="tab active" type="button" data-view="view-assets">Assets</button>
+  <button id="tab-topology"  class="tab"        type="button" data-view="view-topology">Topology</button>
+  <button id="tab-dashboard" class="tab"        type="button" data-view="view-dashboard">Dashboard</button>
 </nav>
 
 <div id="view-assets" class="view">
@@ -126,7 +127,42 @@
 
 </div>
 
+<div id="view-dashboard" class="view" hidden>
+
+  <div id="dash-empty" class="dash-empty" hidden>
+    Run an audit on the Assets tab — charts update live while it streams.
+  </div>
+
+  <div id="dash-content" hidden>
+    <section id="dash-stats" class="dash-stats"></section>
+
+    <section class="dash-grid">
+      <div id="dash-card-providers" class="dash-card">
+        <h2>Assets by provider</h2>
+        <div id="dash-donut" class="dash-donut"></div>
+      </div>
+
+      <div id="dash-card-types" class="dash-card">
+        <h2>Top asset types</h2>
+        <div id="dash-types"></div>
+      </div>
+
+      <div id="dash-card-regions" class="dash-card">
+        <h2>Assets by region</h2>
+        <div id="dash-regions"></div>
+      </div>
+
+      <div id="dash-card-accounts" class="dash-card">
+        <h2>Assets by account</h2>
+        <div id="dash-accounts"></div>
+      </div>
+    </section>
+  </div>
+
+</div>
+
 <script src="/app.js"></script>
 <script src="/topology.js"></script>
+<script src="/charts.js"></script>
 </body>
 </html>

@@ -106,3 +106,38 @@ tbody td.muted { color: var(--fg-muted); }
 .topo-edge-list .conf { color: var(--fg-muted); font-style: italic; }
 .topo-edge-list .peer { padding: 0; border: none; background: none; color: var(--accent); cursor: pointer; text-align: left; overflow-wrap: anywhere; }
 .topo-edge-list .peer:hover { background: none; text-decoration: underline; }
+
+/* ---------- dashboard ---------- */
+
+.dash-empty { padding: 3rem 1rem; text-align: center; color: var(--fg-muted); font-style: italic; }
+
+.dash-stats { display: flex; flex-wrap: wrap; gap: .8rem; padding: 1rem 1rem .2rem; }
+.dash-stat { display: flex; flex-direction: column; align-items: center; min-width: 7rem; padding: .5rem 1rem; background: var(--bg-muted); border: 1px solid var(--border); border-radius: 4px; }
+.dash-stat-value { font-size: 1.4rem; font-weight: 600; }
+.dash-stat-label { font-size: .7rem; text-transform: uppercase; color: var(--fg-muted); }
+
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr)); gap: 1rem; padding: 1rem; align-items: start; }
+.dash-card { padding: .8rem 1rem; border: 1px solid var(--border); border-radius: 4px; }
+.dash-card h2 { margin: 0 0 .6rem; font-size: .85rem; text-transform: uppercase; color: var(--fg-muted); }
+
+.dash-donut { display: flex; align-items: center; gap: 1.2rem; }
+.dash-donut-svg { width: 11rem; flex: none; }
+.dash-arc { cursor: pointer; }
+.dash-arc:hover { opacity: .8; }
+.dash-donut-total { font-size: 26px; font-weight: 600; fill: var(--fg); }
+.dash-donut-caption { font-size: 11px; text-transform: uppercase; fill: var(--fg-muted); }
+
+.dash-legend { min-width: 0; font-size: .8rem; }
+.dash-legend-row { display: flex; align-items: center; gap: .4rem; padding: .15rem 0; cursor: pointer; }
+.dash-legend-row:hover { color: var(--accent); }
+.dash-legend-row .dot { width: .6rem; height: .6rem; border-radius: 50%; flex: none; }
+.dash-legend-row .count { color: var(--fg-muted); }
+
+.dash-bars { display: block; width: 100%; }
+.dash-bar-row { cursor: pointer; }
+.dash-bar-hit { fill: transparent; }
+.dash-bar-row:hover .dash-bar-hit { fill: rgba(9, 105, 218, .06); }
+.dash-bar { fill: var(--accent); }
+.dash-bar-label { font-size: 12px; fill: var(--fg); dominant-baseline: central; }
+.dash-bar-count { font-size: 12px; fill: var(--fg-muted); dominant-baseline: central; }
+.dash-more { margin-top: .4rem; font-size: .75rem; }
