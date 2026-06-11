@@ -10,9 +10,10 @@ JSON, CSV, or Excel (XLSX) output.
 > static, non-root), Helm chart, GitHub Actions (CI + goreleaser + multi-arch
 > GHCR + Trivy + reusable `audit` action), docs, and the topology graph
 > (`auditor topology` → JSON / DOT / Mermaid plus `/api/v1/topology`).
-> Remaining work is the per-provider stubbed resource types
-> (11 Cloudflare, 15 OCI). See [`init-plan.md`](./init-plan.md) for the
-> full plan and [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
+> Every provider's resource types are fully implemented — Cloudflare,
+> OCI, and Kubernetes all collect their complete catalogs. See
+> [`init-plan.md`](./init-plan.md) for the full plan and
+> [`CLAUDE.md`](./CLAUDE.md) for architecture notes.
 
 ## Install
 
@@ -47,8 +48,9 @@ and Helm chart are documented under [Container](#container) and
 ## Quick start
 
 ```bash
-# Cloudflare (Phase 2): zones + DNS today; other 11 types are stubs.
-export CLOUDFLARE_API_TOKEN=cf-token-with-zone-read-and-dns-read
+# Cloudflare (Phase 2): accounts, zones, DNS, R2, KV, Workers, D1, Pages,
+# Access apps, Tunnels, certificates, Rulesets, Page Rules, Load Balancers.
+export CLOUDFLARE_API_TOKEN=cf-token-with-read-scopes
 ./bin/auditor audit --provider cloudflare -o csv > cf.csv
 
 # OCI (Phase 3): compartment recursion + all resource types (compute,
@@ -337,15 +339,15 @@ A full extending guide ships in Phase 9.
 | Phase | Status   | Scope |
 | ----- | -------- | ----- |
 | 1 — Foundation              | shipped  | Core types, JSON / CSV renderers, CLI skeleton, version, justfile |
-| 2 — Cloudflare provider     | partial  | Zones + DNS records implemented; R2 / KV / Workers / D1 / Pages / Access / Tunnels / Load Balancers / Rulesets / Page Rules / Certificates stubbed |
-| 3 — OCI provider            | partial  | Compartment recursion + region resolution + Compute + Load Balancers implemented; Block / Boot volumes, VCNs, Subnets, Object Storage, Autonomous DBs, DB Systems, Functions, Container Instances, OKE, Vaults, Policies, Users, Groups, Dynamic Groups stubbed |
+| 2 — Cloudflare provider     | shipped  | Accounts, Zones, DNS, R2, KV, Workers, D1, Pages, Access apps, Tunnels, certificate packs / custom / mTLS certificates, Rulesets (account + zone), Page Rules, Load Balancers — every planned resource type implemented |
+| 3 — OCI provider            | shipped  | Compartment recursion + region resolution + Compute, Load Balancers, Block / Boot volumes, VCNs, Subnets, Object Storage, Autonomous DBs, DB Systems, Functions, Container Instances, OKE, Vaults, Policies, Users, Groups, Dynamic Groups |
 | 4 — Kubernetes provider     | shipped  | Dynamic-client + discovery — every built-in resource type and every CRD with no per-resource code. `--kube-context`, `--kube-namespace`, `--kube-exclude-namespaces` honored; per-GVR Forbidden tolerated; aggregated-API discovery failures degrade to warnings |
 | 5 — Web UI                  | shipped  | Embedded SPA + JSON/SSE API. `auditor serve --addr ... --auth none\|basic\|token`. Streamed asset table, filter / sort / type+provider facets, CSV/JSON export, graceful shutdown. Plain JS rather than the planned Alpine.js — keeps the binary fully self-contained |
 | 6 — Docker                  | shipped  | Multi-stage build → `gcr.io/distroless/static-debian12:nonroot`. Non-root (UID 65532), reproducible-ish (`-trimpath`, ldflags-injected version), accepts `--platform` for multi-arch. ~75 MB rather than the plan's <30 MB target (cloudflare-go/v4 + oci-go-sdk/v65 + k8s client-go are large) |
 | 7 — Helm chart              | shipped  | `deploy/helm/cloud-asset-auditor/` — CronJob (default, optional PVC for persisted output) and Deployment (Service + optional Ingress) modes. BYO credentials Secret (`existingSecret`). Read-only `get,list` ClusterRole (overridable). Example values for both modes |
 | 8 — GitHub Actions          | shipped  | `ci.yml` (test + lint + gosec + helm lint + smoke), `release.yml` (goreleaser cross-build + cosign keyless + SBOM), `docker.yml` (multi-arch GHCR push + cosign image sign + Trivy SARIF), reusable `actions/audit` composite |
 | 9 — Docs                    | shipped  | [`docs/configuration.md`](./docs/configuration.md), [`docs/providers.md`](./docs/providers.md), [`docs/extending.md`](./docs/extending.md). README install paths cover prebuilt release / `go install` / from-source / Docker / Helm |
-| 10 — Network topology       | shipped  | `auditor topology` subcommand → JSON / DOT / Mermaid / **Excalidraw** (LR-layered layout, color-coded per provider, dashed arrows for heuristic edges, deterministic seeds for diff-friendly output). Resolvers: `dnsToTarget` (cross-cloud heuristic), `wafBinding` (skeleton), `lbToGateway` (OCI LB → K8s Service by external IP), `gatewayToService` (Ingress / HTTPRoute → backing Service, exact). `/api/v1/topology` returns JSON by default or any format via `?format=` |
+| 10 — Network topology       | shipped  | `auditor topology` subcommand → JSON / DOT / Mermaid / **Excalidraw** (LR-layered layout, color-coded per provider, dashed arrows for heuristic edges, deterministic seeds for diff-friendly output). Resolvers: `dnsToTarget` (cross-cloud heuristic), `wafBinding` (CF ruleset / Access app / tunnel / page rule → zone, exact), `lbToGateway` (OCI LB → K8s Service by external IP), `gatewayToService` (Ingress / HTTPRoute → backing Service, exact). `/api/v1/topology` returns JSON by default or any format via `?format=` |
 
 ## Docs
 

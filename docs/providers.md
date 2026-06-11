@@ -5,7 +5,7 @@ permission set, and per-resource implementation status.
 
 | Provider     | Phase | Implementation status                                  |
 | ------------ | ----- | ------------------------------------------------------ |
-| Cloudflare   | 2     | Zones + DNS records implemented; 11 resource types stubbed |
+| Cloudflare   | 2     | **Complete** — accounts, zones, DNS, R2, KV, Workers, D1, Pages, Access, Tunnels, certificates, Rulesets, Page Rules, Load Balancers |
 | OCI          | 3     | **Complete** — compartments + regions + all resource types implemented (compute, networking, storage, object storage, databases, functions, container instances, OKE, vaults, IAM) |
 | Kubernetes   | 4     | **Universal** — dynamic-client + discovery lists every built-in resource type and every CRD with no per-resource code |
 
@@ -27,36 +27,53 @@ auditor audit --provider cloudflare
 Create a custom token at https://dash.cloudflare.com/profile/api-tokens
 with the following permissions (account-level):
 
-| Permission          | Access |
-| ------------------- | ------ |
-| `Zone`              | Read   |
-| `Zone.DNS`          | Read   |
+| Permission                     | Access |
+| ------------------------------ | ------ |
+| `Account.Account Settings`     | Read   |
+| `Zone`                         | Read   |
+| `Zone.DNS`                     | Read   |
+| `Account.Workers R2 Storage`   | Read   |
+| `Account.Workers KV Storage`   | Read   |
+| `Account.Workers Scripts`      | Read   |
+| `Account.D1`                   | Read   |
+| `Account.Cloudflare Pages`     | Read   |
+| `Account.Access: Apps and Policies` | Read |
+| `Account.Cloudflare Tunnel`    | Read   |
+| `Account.mTLS Certificates`    | Read   |
+| `Zone.SSL and Certificates`    | Read   |
+| `Account.Account Rulesets` / `Zone.Zone WAF` | Read |
+| `Zone.Page Rules`              | Read   |
+| `Zone.Load Balancers`          | Read   |
 
-Add additional `Read` permissions as more resource types come online
-(R2, KV, Workers, etc. — see resource matrix below).
+A token missing a scope degrades gracefully: that collector reports one
+error and every other resource type still lands (exit code 2 = partial).
 
 ### Resource matrix
 
-| Resource type                        | Asset type                  | Status   |
-| ------------------------------------ | --------------------------- | -------- |
-| Zones                                | `cloudflare.zone`           | shipped  |
-| DNS records                          | `cloudflare.dns_record`     | shipped  |
-| R2 buckets                           | `cloudflare.r2_bucket`      | stub     |
-| KV namespaces                        | `cloudflare.kv_namespace`   | stub     |
-| Workers scripts                      | `cloudflare.worker_script`  | stub     |
-| Workers routes (per zone)            | `cloudflare.worker_route`   | stub     |
-| Pages projects                       | `cloudflare.pages_project`  | stub     |
-| D1 databases                         | `cloudflare.d1_database`    | stub     |
-| Access apps                          | `cloudflare.access_app`     | stub     |
-| Tunnels                              | `cloudflare.tunnel`         | stub     |
-| Load Balancers (per zone)            | `cloudflare.load_balancer`  | stub     |
-| Rulesets (account + per zone)        | `cloudflare.ruleset`        | stub     |
-| Page Rules (per zone)                | `cloudflare.page_rule`      | stub     |
-| Certificates                         | `cloudflare.certificate`    | stub     |
+| Resource type                        | Asset type                       | Scope          |
+| ------------------------------------ | -------------------------------- | -------------- |
+| Accounts                             | `cloudflare.account`             | token          |
+| Zones                                | `cloudflare.zone`                | token          |
+| DNS records                          | `cloudflare.dns_record`          | per zone       |
+| R2 buckets                           | `cloudflare.r2_bucket`           | per account    |
+| KV namespaces                        | `cloudflare.kv_namespace`        | per account    |
+| Workers scripts                      | `cloudflare.worker_script`       | per account    |
+| Pages projects                       | `cloudflare.pages_project`       | per account    |
+| D1 databases                         | `cloudflare.d1_database`         | per account    |
+| Access apps                          | `cloudflare.access_app`          | per account    |
+| Tunnels (cloudflared)                | `cloudflare.tunnel`              | per account    |
+| Certificate packs (edge)             | `cloudflare.certificate_pack`    | per zone       |
+| Custom certificates                  | `cloudflare.custom_certificate`  | per zone       |
+| mTLS certificates                    | `cloudflare.mtls_certificate`    | per account    |
+| Rulesets (`scope` tag = account/zone)| `cloudflare.ruleset`             | account + zone |
+| Page Rules                           | `cloudflare.page_rule`           | per zone       |
+| Load Balancers                       | `cloudflare.load_balancer`       | per zone       |
 
-Stubs are wired into the collector orchestrator but emit zero assets
-until the per-resource function is filled in
-(`internal/providers/cloudflare/stubs.go`).
+Every resource type is implemented — there is no `stubs.go` anymore. Each
+collector lives in its own file under `internal/providers/cloudflare/`
+(e.g. `r2.go`, `rulesets.go`) following the `dns.go` template. Zone-scoped
+assets carry `zone_id` / `zone_name` tags, which is what the topology
+`wafBinding` resolver joins on.
 
 ### SDK notes
 

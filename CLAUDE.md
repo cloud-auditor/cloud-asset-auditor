@@ -4,13 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-**All 10 phases of [`init-plan.md`](./init-plan.md) shipped; the project is in maintenance / fill-in mode.** Outstanding work:
+**All 10 phases of [`init-plan.md`](./init-plan.md) shipped and every provider's resource catalog is fully implemented; the project is in maintenance / enhancement mode.**
 
-- 12 Cloudflare stub collectors in `internal/providers/cloudflare/stubs.go` (Rulesets is stubbed at both account and zone scope)
+- Cloudflare: **all resource types implemented** — the former `stubs.go` is gone; collectors live one-per-file (`r2.go`, `kv.go`, `workers.go`, `d1.go`, `pages.go`, `access.go`, `tunnels.go`, `certificates.go`, `rulesets.go`, `page_rules.go`, `load_balancers.go`, `accounts.go`) alongside the original `zones.go` / `dns.go`.
 - OCI: **all resource types implemented** — the former `stubs.go` is gone; collectors live in `network.go`, `storage.go`, `object_storage.go`, `database.go`, `functions.go`, `container_instances.go`, `oke.go`, `vaults.go`, `iam.go` alongside the original `compute.go` / `load_balancer.go`.
 - (Kubernetes is universal via dynamic-client + discovery — no stubs)
-
-Each remaining Cloudflare stub is wired into its provider's `Collect` orchestrator; filling one in is one file's worth of work using `internal/providers/cloudflare/dns.go` or any OCI collector (e.g. `internal/providers/oci/network.go`) as a template.
 
 Anything else substantial — read [`init-plan.md`](./init-plan.md) end-to-end first. It is still the single source of truth for layout, abstractions, and phase ordering. Document any deviation explicitly (see the **Deviations from the plan** section below).
 
@@ -67,7 +65,7 @@ When adding a new CLI flag that needs to reach providers, extend `providerOption
 
 - **OCI** — Must recurse compartments from the tenancy root (the canonical OCI mistake). Handled in `internal/providers/oci/compartments.go` via the SDK's `CompartmentIdInSubtree=true`. Auth chain (`auth.go`): instance principal (gated by a 250 ms IMDS probe so laptops don't pay the cost) → resource principal (gated by `OCI_RESOURCE_PRINCIPAL_VERSION` env) → config file → env vars. Resource fan-out is per (region × compartment × resource type). **Region default** (`regions.go::resolveRegions`): no `--oci-regions` flag (or the explicit `all` sentinel) now scans **every subscribed region**; on a subscription-lookup failure it falls back to the home region rather than aborting. A `listSubscribed` field on the Provider is a test seam (the identity SDK panics on nil auth, so the default path can't be unit-tested with a live client). **Policies** are region-independent but compartment-scoped, so they run once per compartment outside the region loop (`iam.go`); **Users / Groups / DynamicGroups** are tenancy-root-only and run exactly once. Two collector-specific notes: Object Storage's namespace is resolved once via a `sync.Once` cache on the Provider (`object_storage.go::objectStorageNamespace`) and shared across every bucket collector; block/boot volume listing omits `AvailabilityDomain` (optional in oci-go-sdk v65 — confirmed working against the live API), so one per-compartment call covers all ADs.
 - **Kubernetes** — Dynamic client + discovery (`ServerPreferredResources` → `dynamicClient.Resource(gvr).List`), **not** typed clients. That's what makes CRDs come along for free. `internal/providers/kubernetes/discover.go::filterResources` drops subresources (names containing `/`) and anything whose verb list doesn't include `list`. Per-GVR `Forbidden` / `MethodNotSupported` errors are swallowed silently — they mean the SA can't read that type, which is a permission gap, not a bug. `*discovery.ErrGroupDiscoveryFailed` (a downed aggregated API server) is treated as a warning.
-- **Cloudflare** — Token-only auth (`CLOUDFLARE_API_TOKEN`); no legacy email+key path. `errgroup` capped by `--max-concurrency` (default 5) fans out per-zone and account-scoped collectors.
+- **Cloudflare** — Token-only auth (`CLOUDFLARE_API_TOKEN`); no legacy email+key path. `errgroup` capped by `--max-concurrency` (default 5) fans out per-zone and account-scoped collectors. The account list is fetched once per Provider behind a `sync.Once` (`accounts.go::listAccounts`) and shared by every account-scoped collector; accounts are also emitted as `cloudflare.account` assets. Collector quirks: R2's v4 SDK `Buckets.List` discards the pagination cursor, so `r2.go` pages via `start_after` + lexicographic bucket order; `certificates.go` covers three families (per-zone certificate packs, per-zone custom certs, per-account mTLS certs) and re-lists zones itself, joining per-family errors with `errors.Join`; managed rulesets can surface the same ruleset ID at both account and zone scope (discriminated by the `scope` tag); zone-scoped assets always carry `zone_id`/`zone_name` tags — the topology `wafBinding` resolver joins on `zone_id` and matches types `cloudflare.ruleset`, `cloudflare.access_app`, `cloudflare.tunnel`, `cloudflare.page_rule` exactly.
 
 ### Topology resolvers (Phase 10)
 
@@ -76,7 +74,7 @@ When adding a new CLI flag that needs to reach providers, extend `providerOption
 - `dnsToTarget` — DNS records → matched LB/Service by IP or CNAME. **Heuristic** confidence (cross-cloud join).
 - `lbToGateway` — OCI LB IPs → K8s Service external IPs. **Heuristic**.
 - `gatewayToService` — K8s Ingress / HTTPRoute spec → backing Service. **Exact**. Requires `Asset.Raw` (the topology CLI forces `--include-raw=true`).
-- `wafBinding` — CF Rulesets/Access/Tunnels → protected zone. **Exact** (but emits zero edges today because the CF security stubs aren't implemented).
+- `wafBinding` — CF Rulesets/Access/Tunnels/Page Rules → protected zone. **Exact** (live since the CF collectors shipped — joins `Tags["zone_id"]` to the zone asset).
 
 Renderer outputs are **deterministic** (sorted nodes/edges, FNV-hashed Excalidraw element IDs) so two runs of the same topology produce byte-identical files. Tests assert this for Excalidraw.
 
