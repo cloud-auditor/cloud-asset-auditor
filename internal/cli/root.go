@@ -95,6 +95,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newProvidersCmd(state))
 	cmd.AddCommand(newTopologyCmd(state))
+	cmd.AddCommand(newDiffCmd())
 	return cmd
 }
 
