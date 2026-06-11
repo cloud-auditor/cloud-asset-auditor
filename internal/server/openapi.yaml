@@ -214,7 +214,7 @@ paths:
           - `dns` — DNS records → matched LB/Service by IP or CNAME (heuristic)
           - `lb-backend` — OCI LB IPs → K8s Service external IPs (heuristic)
           - `gateway-route` — K8s Ingress/HTTPRoute → backing Service (exact)
-          - `waf` — CF Rulesets/Access/Tunnels → protected zone (exact; today emits nothing because CF security stubs are unimplemented)
+          - `waf` — CF Rulesets/Access apps/Tunnels/Page Rules → protected zone (exact)
       parameters:
         - $ref: "#/components/parameters/ProvidersParam"
         - $ref: "#/components/parameters/TimeoutParam"
@@ -258,6 +258,78 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [topology]
+      summary: Build a topology graph from client-supplied assets
+      description: |
+        Same graph engine as the GET variant, but the assets come from the
+        request body instead of a fresh audit — instant, zero provider API
+        calls. The web UI posts the assets it already streamed; CLI users can
+        pipe a saved `auditor audit -o json --include-raw` snapshot. Include
+        `raw` payloads on Kubernetes assets if you want the exact
+        Ingress/HTTPRoute → Service edges (the resolvers read them).
+      parameters:
+        - name: hostname
+          in: query
+          description: Filter to the connected component reachable from this DNS hostname. Repeatable.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: include-orphans
+          in: query
+          description: Keep asset nodes that have no incident edges
+          schema:
+            type: boolean
+            default: false
+        - name: format
+          in: query
+          description: Output format. `json` returns the envelope below; others return a downloadable rendering.
+          schema:
+            type: string
+            enum: [json, dot, mermaid, excalidraw]
+            default: json
+      requestBody:
+        required: true
+        description: |
+          Either a bare JSON array of assets (what `auditor audit -o json`
+          emits) or an `{"assets": [...]}` envelope. Bodies above 128 MiB
+          are rejected with 413.
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: array
+                  items:
+                    $ref: "#/components/schemas/Asset"
+                - type: object
+                  properties:
+                    assets:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/Asset"
+      responses:
+        "200":
+          description: Topology graph or rendered file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopologyResponse"
+            text/vnd.graphviz:
+              schema:
+                type: string
+            text/plain:
+              schema:
+                type: string
+                description: Used by the `mermaid` format
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          description: Request body exceeded the 128 MiB cap
 
 components:
   parameters:

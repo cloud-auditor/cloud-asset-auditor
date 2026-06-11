@@ -1,7 +1,12 @@
 package server
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -67,17 +72,111 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	<-errsDone
 
 	topo := topology.Build(collected)
-	if len(hostnames) > 0 {
-		topo = topo.FilterByHostname(hostnames)
+	s.renderTopology(w, topo, topologyRenderOpts{
+		format:         format,
+		hostnames:      hostnames,
+		includeOrphans: includeOrphans,
+		initErrs:       initErrs,
+		collectErrs:    collectErrs,
+	})
+}
+
+// maxTopologyBodyBytes caps POST /api/v1/topology request bodies. 128 MiB
+// comfortably fits raw-bearing audits of large clusters while bounding what
+// an unauthenticated-adjacent client can make the server buffer.
+const maxTopologyBodyBytes = 128 << 20
+
+// handleTopologyBuild builds a graph from assets supplied by the client
+// instead of running an audit. The web UI uses this: the Assets tab already
+// holds every streamed asset in memory, so building the diagram from them is
+// instant and costs zero provider API calls. Accepts the same hostname /
+// include-orphans / format query params as the GET handler.
+func (s *Server) handleTopologyBuild(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	format := strings.ToLower(q.Get("format"))
+	if format == "" {
+		format = "json"
 	}
-	if !includeOrphans {
+
+	assets, err := decodeAssetsBody(http.MaxBytesReader(w, r.Body, maxTopologyBodyBytes))
+	if err != nil {
+		status := http.StatusBadRequest
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		http.Error(w, "decode assets: "+err.Error(), status)
+		return
+	}
+
+	topo := topology.Build(assets)
+	s.renderTopology(w, topo, topologyRenderOpts{
+		format:         format,
+		hostnames:      q["hostname"],
+		includeOrphans: parseBoolParam(q.Get("include-orphans")),
+	})
+}
+
+// decodeAssetsBody accepts either a bare JSON array of assets (what
+// `auditor audit -o json` emits) or an {"assets": [...]} envelope (what a
+// JS client naturally builds). The first non-whitespace byte disambiguates.
+func decodeAssetsBody(r io.Reader) ([]core.Asset, error) {
+	br := bufio.NewReader(r)
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			return nil, fmt.Errorf("empty body (want a JSON array of assets or {\"assets\": [...]}): %w", err)
+		}
+		if b == ' ' || b == '\t' || b == '\n' || b == '\r' {
+			continue
+		}
+		if err := br.UnreadByte(); err != nil {
+			return nil, err
+		}
+		break
+	}
+
+	first, _ := br.Peek(1)
+	dec := json.NewDecoder(br)
+	if len(first) == 1 && first[0] == '[' {
+		var assets []core.Asset
+		if err := dec.Decode(&assets); err != nil {
+			return nil, err
+		}
+		return assets, nil
+	}
+	var envelope struct {
+		Assets []core.Asset `json:"assets"`
+	}
+	if err := dec.Decode(&envelope); err != nil {
+		return nil, err
+	}
+	return envelope.Assets, nil
+}
+
+// topologyRenderOpts carries everything renderTopology needs that isn't the
+// graph itself — kept as a struct so the GET (audit-backed) and POST
+// (client-supplied assets) handlers share one rendering tail.
+type topologyRenderOpts struct {
+	format         string
+	hostnames      []string
+	includeOrphans bool
+	initErrs       []string
+	collectErrs    []string
+}
+
+func (s *Server) renderTopology(w http.ResponseWriter, topo *topology.Topology, opts topologyRenderOpts) {
+	if len(opts.hostnames) > 0 {
+		topo = topo.FilterByHostname(opts.hostnames)
+	}
+	if !opts.includeOrphans {
 		topo = topo.DropOrphans()
 	}
 
 	// JSON keeps the historical envelope (nodes + edges + init_errors +
 	// errors) so existing clients aren't broken. Every other format goes
 	// straight through topology.New and lands as a download.
-	if format == "json" {
+	if opts.format == "json" {
 		resp := struct {
 			Nodes      []core.Asset `json:"nodes"`
 			Edges      []core.Edge  `json:"edges"`
@@ -89,26 +188,26 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 			// it bloats the JSON considerably.
 			Nodes:      stripRaw(topo.Nodes),
 			Edges:      topo.Edges,
-			InitErrors: initErrs,
-			Errors:     collectErrs,
+			InitErrors: opts.initErrs,
+			Errors:     opts.collectErrs,
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
-	renderer, err := topology.New(format)
+	renderer, err := topology.New(opts.format)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	contentType, filename := topologyContentType(format)
+	contentType, filename := topologyContentType(opts.format)
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	if len(initErrs) > 0 {
-		w.Header().Set("X-Auditor-Init-Errors", strings.Join(initErrs, "; "))
+	if len(opts.initErrs) > 0 {
+		w.Header().Set("X-Auditor-Init-Errors", strings.Join(opts.initErrs, "; "))
 	}
-	if len(collectErrs) > 0 {
-		w.Header().Set("X-Auditor-Errors", strings.Join(collectErrs, "; "))
+	if len(opts.collectErrs) > 0 {
+		w.Header().Set("X-Auditor-Errors", strings.Join(opts.collectErrs, "; "))
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = renderer.Render(topo, w)

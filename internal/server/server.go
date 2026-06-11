@@ -132,6 +132,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/audit", s.handleAuditSSE)
 	s.mux.HandleFunc("GET /api/v1/audit/export", s.handleAuditExport)
 	s.mux.HandleFunc("GET /api/v1/topology", s.handleTopology)
+	s.mux.HandleFunc("POST /api/v1/topology", s.handleTopologyBuild)
 }
 
 // handleOpenAPI serves the embedded OpenAPI 3.1 spec verbatim. Spec
