@@ -45,6 +45,41 @@ run *ARGS:
 demo ADDR="127.0.0.1:8080":
     go run ./cmd/auditor serve --demo --include-raw --addr {{ADDR}}
 
+# Generated from the demo fixture, never a real tenancy — see docs/diagrams/README.md.
+#
+# Regenerate docs/diagrams/ (needs d2 + rsvg-convert).
+diagrams:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v d2 >/dev/null || { echo "d2 not found — brew install d2" >&2; exit 1; }
+    command -v rsvg-convert >/dev/null || { echo "rsvg-convert not found — brew install librsvg" >&2; exit 1; }
+    out=docs/diagrams
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$out"
+    export AUDITOR_DEMO_DURATION=0
+    # Built once rather than four `go run`s — and `go run` swallows the real
+    # exit code (it exits 1 and prints "exit status N"), which matters here:
+    # the demo reports three simulated non-fatal provider errors on purpose, so
+    # it exits 2 (partial failure) every time. That is success; anything else
+    # is not, and with `go run` the two are indistinguishable.
+    go build -o "$tmp/auditor" ./cmd/auditor
+    topo() {
+        local rc=0
+        "$tmp/auditor" topology --demo --group-by provider "$@" || rc=$?
+        [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]
+    }
+    for level in high:medium low:low; do
+        name=${level%%:*}; detail=${level#*:}
+        topo --detail "$detail" -o d2         > "$tmp/$name.d2"
+        topo --detail "$detail" -o excalidraw > "$out/northwind-$name-level.excalidraw"
+        d2 --layout elk --pad 40 "$tmp/$name.d2" "$out/northwind-$name-level.svg" >/dev/null
+        chmod 644 "$out/northwind-$name-level.svg"
+    done
+    rsvg-convert -w 2200 "$out/northwind-high-level.svg" -o "$out/northwind-high-level.png"
+    rsvg-convert -w 3000 "$out/northwind-low-level.svg"  -o "$out/northwind-low-level.png"
+    echo "diagrams regenerated in docs/diagrams/"
+
 # Build the multi-stage container image. Tags both :{{VERSION}} (immutable)
 # and :latest (convenient for local docker-run).
 docker:

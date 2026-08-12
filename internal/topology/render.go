@@ -279,7 +279,10 @@ func dotLabel(a core.Asset) string {
 	if name == "" {
 		name = a.ID
 	}
-	return a.Type + "\n" + name
+	if t := DisplayType(a); t != "" {
+		return t + "\n" + name
+	}
+	return name
 }
 
 func edgeLabel(e core.Edge) string {

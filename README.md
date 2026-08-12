@@ -283,6 +283,14 @@ GitHub Actions live in `.github/workflows/`:
 
 ## Topology
 
+Two generated diagrams of the demo estate live in
+[`docs/diagrams/`](./docs/diagrams) — a high-level view (one box per provider
+and resource type) and a low-level one (every asset), each as `.excalidraw`,
+`.svg` and `.png`. Regenerate with `just diagrams`. They are built from the
+synthetic demo fixture on purpose: a topology diagram of a real estate is a
+complete map of someone's infrastructure and does not belong in a public repo.
+
+
 `auditor topology` walks the inventory and infers the request-path graph
 between assets: DNS → security → cloud LB → cluster gateway → Service →
 backing Pods, alongside the OCI network backbone (subnet / gateway / OKE

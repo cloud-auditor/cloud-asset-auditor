@@ -431,6 +431,14 @@ textarea:focus-visible {
   gap: 18px;
   height: var(--topbar-h);
   padding: 0 20px;
+  /* Scrollable at every width, not just under the 720px breakpoint. Between
+     roughly 760px and 1000px the bar overflows — four nav items, a status
+     pill, a counter, a clock, the theme control and the API link — and with
+     `visible` it simply clips, putting the theme toggle and the API link
+     off-screen with no way to reach them. A split-screen window on a 13"
+     laptop lands squarely in that range. */
+  overflow-x: auto;
+  scrollbar-width: none;
   background: var(--glass-bar);
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
@@ -514,6 +522,8 @@ textarea:focus-visible {
   max-width: 72ch;
 }
 .page-head .spacer { flex: 1; }
+
+.topbar::-webkit-scrollbar { display: none; }
 
 /* ---------- progress line ---------- */
 
@@ -1916,7 +1926,6 @@ button.bar-row[data-on='true']:hover:not(:disabled) {
   .topbar {
     gap: 10px;
     padding: 0 12px;
-    overflow-x: auto;
   }
   .main { padding: 16px 12px 48px; }
   .inspector {

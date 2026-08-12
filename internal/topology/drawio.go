@@ -234,7 +234,10 @@ func drawioLabel(a core.Asset) string {
 	if name == "" {
 		name = a.ID
 	}
-	return name + "\n" + shortType(a.Type)
+	if t := DisplayType(a); t != "" {
+		return name + "\n" + shortType(t)
+	}
+	return name
 }
 
 // drawioNum formats a coordinate without trailing zeros ("40", not "40.000"),

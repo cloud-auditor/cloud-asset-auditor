@@ -34,6 +34,20 @@ const (
 // differently from a real asset.
 const CollapsedNodeType = "topology.group"
 
+// DisplayType is the type a renderer should print in a node label, or "" when
+// there is nothing worth printing.
+//
+// A collapsed node's Type is always CollapsedNodeType, which says only "this
+// is a group" — something the label, the member count and the enclosing
+// cluster already say three times over. Repeating it on every box is what
+// turns a high-level diagram into a wall of "(topology.group)".
+func DisplayType(a core.Asset) string {
+	if a.Type == CollapsedNodeType {
+		return ""
+	}
+	return a.Type
+}
+
 // ParseDetail validates a --detail flag value. Empty means DetailLow, so an
 // unset flag keeps the historical full-graph behaviour. An unrecognised value
 // is an error rather than a silent fallback: silently rendering 40,000 nodes

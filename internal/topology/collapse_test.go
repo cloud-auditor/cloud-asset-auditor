@@ -298,3 +298,16 @@ func TestRenderGroupBy_SuppressedAtHighDetail(t *testing.T) {
 		}
 	}
 }
+
+// A collapsed node's Type is the synthetic CollapsedNodeType. Printing it in a
+// label says only "this is a group", which the label, the member count and the
+// enclosing cluster already say — and repeating it on every box is what turned
+// a high-level diagram into a wall of "(topology.group)".
+func TestDisplayType_OmitsTheSyntheticGroupType(t *testing.T) {
+	if got := DisplayType(core.Asset{Type: CollapsedNodeType}); got != "" {
+		t.Errorf("collapsed node display type = %q, want empty", got)
+	}
+	if got := DisplayType(core.Asset{Type: "v1.Pod"}); got != "v1.Pod" {
+		t.Errorf("real type must survive, got %q", got)
+	}
+}

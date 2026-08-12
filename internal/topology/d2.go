@@ -86,5 +86,8 @@ func d2Label(a core.Asset) string {
 	if name == "" {
 		name = a.ID
 	}
-	return name + " (" + a.Type + ")"
+	if t := DisplayType(a); t != "" {
+		return name + " (" + t + ")"
+	}
+	return name
 }
