@@ -25,7 +25,7 @@ type excalidrawRenderer struct{}
 
 func (excalidrawRenderer) Render(t *Topology, w io.Writer) error {
 	layout := layoutLR(t)
-	elements := buildExcalidrawElements(t, layout)
+	elements, files := buildExcalidrawElements(t, layout)
 
 	doc := map[string]any{
 		"type":     "excalidraw",
@@ -36,10 +36,10 @@ func (excalidrawRenderer) Render(t *Topology, w io.Writer) error {
 			"viewBackgroundColor":    "#ffffff",
 			"currentItemFontFamily":  2, // Helvetica — legible, not the rough Virgil
 			"currentItemStrokeColor": "#1f2328",
-			"currentItemRoughness":   1,
+			"currentItemRoughness":   0, // crisp lines suit an architecture diagram
 			"gridSize":               20,
 		},
-		"files": map[string]any{},
+		"files": files,
 	}
 
 	enc := json.NewEncoder(w)
@@ -53,12 +53,15 @@ func (excalidrawRenderer) Render(t *Topology, w io.Writer) error {
 // ---------------------------------------------------------------------
 
 const (
-	boxWidth  = 240.0
-	boxHeight = 70.0
-	hSpacing  = 350.0
-	vSpacing  = 110.0
+	boxWidth  = 250.0
+	boxHeight = 96.0
+	hSpacing  = 360.0
+	vSpacing  = 140.0
 	marginX   = 40.0
 	marginY   = 40.0
+
+	iconSize = 40.0 // icon glyph, centred along the top of each box
+	iconPad  = 10.0 // gap between the box top and the icon
 )
 
 type position struct{ x, y float64 }
@@ -160,21 +163,24 @@ func layoutLR(t *Topology) map[string]position {
 // Element construction
 // ---------------------------------------------------------------------
 
-// buildExcalidrawElements assembles rectangles, bound text, and bound
-// arrows for the whole topology. Element IDs are derived from a 64-bit
-// FNV hash of the asset ref / edge identity so output is stable across
-// runs (Excalidraw doesn't care about ID content, only uniqueness).
-func buildExcalidrawElements(t *Topology, layout map[string]position) []map[string]any {
+// buildExcalidrawElements assembles rectangles, bound text, icon images, and
+// bound arrows for the whole topology, plus the `files` map holding the
+// base64 data URL for every icon actually used. Element IDs are derived from
+// a 64-bit FNV hash of the asset ref / edge identity so output is stable
+// across runs (Excalidraw doesn't care about ID content, only uniqueness).
+func buildExcalidrawElements(t *Topology, layout map[string]position) ([]map[string]any, map[string]any) {
 	type rectInfo struct {
 		rectID  string
 		textID  string
 		boundTo []map[string]any // arrow refs to backfill into rect.boundElements
 	}
 	rects := map[string]*rectInfo{} // ref-key → rect info
+	files := map[string]any{}       // fileId → Excalidraw file entry
 
-	out := make([]map[string]any, 0, len(t.Nodes)*2+len(t.Edges))
+	out := make([]map[string]any, 0, len(t.Nodes)*3+len(t.Edges))
 
-	// Rectangles + bound text per node.
+	// Rectangle + icon image + bound text per node. The three share a
+	// groupId so selecting/dragging one in Excalidraw moves the whole card.
 	nodes := append([]core.Asset(nil), t.Nodes...)
 	sort.Slice(nodes, func(i, j int) bool {
 		return refKey(nodes[i].AsRef()) < refKey(nodes[j].AsRef())
@@ -187,10 +193,18 @@ func buildExcalidrawElements(t *Topology, layout map[string]position) []map[stri
 		}
 		rectID := excaliID("rect", k)
 		textID := excaliID("text", k)
+		imageID := excaliID("img", k)
+		groupID := excaliID("grp", k)
 		rects[k] = &rectInfo{rectID: rectID, textID: textID}
 
-		out = append(out, newRect(rectID, textID, pos.x, pos.y, n))
-		out = append(out, newText(textID, rectID, pos.x, pos.y, nodeLabel(n)))
+		ic := iconForAsset(n)
+		if _, seen := files[ic.fileID()]; !seen {
+			files[ic.fileID()] = newFileEntry(ic)
+		}
+
+		out = append(out, newRect(rectID, textID, imageID, groupID, pos.x, pos.y, n))
+		out = append(out, newImage(imageID, groupID, ic.fileID(), pos.x, pos.y))
+		out = append(out, newText(textID, rectID, groupID, pos.x, pos.y, nodeLabel(n)))
 	}
 
 	// Arrows.
@@ -241,43 +255,81 @@ func buildExcalidrawElements(t *Topology, layout map[string]position) []map[stri
 		}
 	}
 
-	return out
+	return out, files
 }
 
-// newRect creates a rectangle node element.
-func newRect(id, textID string, x, y float64, a core.Asset) map[string]any {
+// newRect creates a rectangle node element — the card body. The stroke
+// carries the provider accent colour and the fill a light tint of it, so
+// provider identity is readable while the icon carries service identity.
+func newRect(id, textID, imageID, groupID string, x, y float64, a core.Asset) map[string]any {
+	stroke, fill := providerStyle(a.Provider)
 	return mergeCommon(id, "rectangle", x, y, boxWidth, boxHeight, map[string]any{
-		"strokeColor":     "#1f2328",
-		"backgroundColor": providerFill(a.Provider),
+		"strokeColor":     stroke,
+		"backgroundColor": fill,
 		"fillStyle":       "solid",
 		"strokeWidth":     2,
-		"roughness":       1,
+		"roughness":       0,
 		"roundness":       map[string]any{"type": 3},
-		// boundElements gets backfilled in buildExcalidrawElements.
+		"groupIds":        []string{groupID},
+		// boundElements gets backfilled in buildExcalidrawElements. The icon
+		// image is not container-bound (Excalidraw only binds text), it
+		// tracks the card via the shared groupId instead.
 		"boundElements": []map[string]any{{"id": textID, "type": "text"}},
 	})
 }
 
-// newText creates a text element bound inside a rectangle. The bound
-// pattern is what Excalidraw uses for "text inside shape" — when the
-// user moves the rectangle, the text follows.
-func newText(id, containerID string, x, y float64, text string) map[string]any {
-	// Text is centered inside the box; Excalidraw expects the text element
-	// to share the container's bounds for centered placement.
-	return mergeCommon(id, "text", x+8, y+8, boxWidth-16, boxHeight-16, map[string]any{
+// newImage creates the icon glyph for a node, centred along the top of the
+// card. It references an entry in the document's `files` map by fileId and
+// shares the card's groupId so it moves with the box.
+func newImage(id, groupID, fileID string, x, y float64) map[string]any {
+	ix := x + (boxWidth-iconSize)/2
+	iy := y + iconPad
+	el := mergeCommon(id, "image", ix, iy, iconSize, iconSize, map[string]any{
+		"groupIds": []string{groupID},
+		"fileId":   fileID,
+		"status":   "saved",
+		"scale":    []float64{1, 1},
+		"crop":     nil,
+	})
+	return el
+}
+
+// newText creates a text element bound inside a rectangle, anchored to the
+// bottom of the card so it sits below the icon. The bound pattern is what
+// Excalidraw uses for "text inside shape" — when the user moves the
+// rectangle, the text follows.
+func newText(id, containerID, groupID string, x, y float64, text string) map[string]any {
+	// verticalAlign "bottom" keeps the label clear of the top-of-card icon;
+	// Excalidraw recomputes the exact glyph position from the container, so
+	// the x/y/width/height here just need to be sane bounds.
+	return mergeCommon(id, "text", x+8, y+iconPad+iconSize, boxWidth-16, boxHeight-iconPad-iconSize-8, map[string]any{
 		"strokeColor":   "#1f2328",
 		"text":          text,
 		"originalText":  text,
-		"fontSize":      14,
+		"fontSize":      13,
 		"fontFamily":    2, // Helvetica
 		"textAlign":     "center",
-		"verticalAlign": "middle",
-		"baseline":      14,
+		"verticalAlign": "bottom",
+		"baseline":      13,
 		"containerId":   containerID,
+		"groupIds":      []string{groupID},
 		// Bound text elements stay in sync with the container's
 		// boundElements list — Excalidraw fixes any inconsistencies on
 		// load, so omitting boundElements here is fine.
 	})
+}
+
+// newFileEntry builds the document `files` map value for an icon: a base64
+// SVG data URL plus the metadata Excalidraw expects. Timestamps are fixed at
+// 0 so two renders of the same topology are byte-identical.
+func newFileEntry(ic icon) map[string]any {
+	return map[string]any{
+		"mimeType":      "image/svg+xml",
+		"id":            ic.fileID(),
+		"dataURL":       ic.dataURL(),
+		"created":       int64(0),
+		"lastRetrieved": int64(0),
+	}
 }
 
 // newArrow creates an arrow with start/end bindings to the source and
@@ -304,7 +356,7 @@ func newArrow(id string, from, to position, fromRect, toRect string, e core.Edge
 		"fillStyle":       "solid",
 		"strokeWidth":     2,
 		"strokeStyle":     style,
-		"roughness":       1,
+		"roughness":       0,
 		"points":          [][2]float64{{0, 0}, {dx, dy}},
 		"startBinding":    map[string]any{"elementId": fromRect, "focus": 0.0, "gap": 4},
 		"endBinding":      map[string]any{"elementId": toRect, "focus": 0.0, "gap": 4},
@@ -352,18 +404,19 @@ func mergeCommon(id, kind string, x, y, w, h float64, extra map[string]any) map[
 	return el
 }
 
-// providerFill picks a brand-ish background tint per provider so the
-// graph is readable at a glance.
-func providerFill(provider string) string {
+// providerStyle picks a brand-ish accent stroke + light fill tint per
+// provider so the graph is readable at a glance: the box says "which cloud",
+// the icon says "which service".
+func providerStyle(provider string) (stroke, fill string) {
 	switch strings.ToLower(provider) {
 	case "cloudflare":
-		return "#fef3c7" // amber-100
+		return "#f38020", "#fff4e6" // Cloudflare orange
 	case "oci":
-		return "#fee2e2" // red-100
+		return "#c74634", "#fdecea" // Oracle red
 	case "kubernetes":
-		return "#dbeafe" // blue-100
+		return "#326ce5", "#e7f0ff" // Kubernetes blue
 	default:
-		return "#f3f4f6" // gray-100
+		return "#475569", "#f1f5f9" // slate
 	}
 }
 
@@ -375,10 +428,22 @@ func nodeLabel(a core.Asset) string {
 		name = a.ID
 	}
 	// Trim long names so they fit in the box.
-	if len(name) > 28 {
-		name = name[:25] + "…"
+	if len(name) > 32 {
+		name = name[:29] + "…"
 	}
-	return a.Type + "\n" + name
+	// Name on the first line (what the user scans for), Type beneath it.
+	return name + "\n" + shortType(a.Type)
+}
+
+// shortType drops the API-group/version prefix from a verbose Type so the
+// label reads cleanly: "networking.k8s.io/v1.Ingress" → "Ingress",
+// "oci.object_storage.bucket" → "bucket". Cloud Types keep their last
+// dotted segment; that's enough to disambiguate next to the icon.
+func shortType(typ string) string {
+	if i := strings.LastIndex(typ, "."); i >= 0 && i < len(typ)-1 {
+		return typ[i+1:]
+	}
+	return typ
 }
 
 // excaliID derives a deterministic short element ID from a category +

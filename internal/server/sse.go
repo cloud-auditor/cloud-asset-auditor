@@ -5,12 +5,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 )
 
 // sseWriter formats and flushes Server-Sent Events. It exists so handlers
 // don't have to fumble with the wire format (event:/data:/blank-line) on
 // every emit.
+//
+// emit is guarded by mu because handleAuditSSE emits from two goroutines
+// concurrently (the asset loop and the error-drainer): an event is several
+// writes plus a Flush against a shared json.Encoder, so unsynchronized calls
+// would interleave bytes into corrupt frames and race the encoder — which
+// could panic the drainer goroutine and tear the connection down with no
+// `done` event ("connection closed unexpectedly" in the browser).
 type sseWriter struct {
+	mu      sync.Mutex
 	w       io.Writer
 	flusher http.Flusher
 	enc     *json.Encoder
@@ -37,6 +46,8 @@ func newSSEWriter(w http.ResponseWriter) (*sseWriter, error) {
 // SSE requires data to be one line (no raw newlines) — we encode then strip
 // the trailing newline Encoder appends.
 func (s *sseWriter) emit(event string, v any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, err := fmt.Fprintf(s.w, "event: %s\ndata: ", event); err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package oci
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/oracle/oci-go-sdk/v65/identity"
 
@@ -54,6 +55,79 @@ func (p *Provider) listCompartments(ctx context.Context) ([]identity.Compartment
 	}
 	return out, nil
 }
+
+// filterCompartments narrows a compartment tree to those selected by
+// --oci-compartments. Each selector is either a compartment OCID (exact match,
+// detected by the ocid1. prefix) or a compartment name (case-insensitive). A
+// selected compartment pulls in its entire subtree — an operator who scopes to
+// "Production" means Production and everything beneath it; for an inventory tool
+// under-scoping (silently hiding child compartments) is worse than over-scoping.
+//
+// An empty selector list returns all unchanged. A name that matches several
+// compartments (names aren't unique across the tree) selects every match (and
+// each of their subtrees). The output preserves the input order.
+func filterCompartments(all []identity.Compartment, want []string) []identity.Compartment {
+	if len(want) == 0 {
+		return all
+	}
+
+	idSel := make(map[string]struct{})
+	nameSel := make(map[string]struct{})
+	for _, w := range want {
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
+		}
+		if isCompartmentOCID(w) {
+			idSel[w] = struct{}{}
+		} else {
+			nameSel[strings.ToLower(w)] = struct{}{}
+		}
+	}
+
+	// Directly-selected compartment OCIDs, and the parent of every compartment
+	// (for the upward subtree-membership walk).
+	matched := make(map[string]bool, len(all))
+	parent := make(map[string]string, len(all))
+	for _, c := range all {
+		id := derefStr(c.Id)
+		if id == "" {
+			continue
+		}
+		parent[id] = derefStr(c.CompartmentId)
+		if _, ok := idSel[id]; ok {
+			matched[id] = true
+		}
+		if _, ok := nameSel[strings.ToLower(derefStr(c.Name))]; ok {
+			matched[id] = true
+		}
+	}
+
+	// keep reports whether a compartment is selected or descends from one, by
+	// walking parent pointers to the root. The step counter is a belt-and-braces
+	// guard against a malformed (cyclic) parent chain — a real tree never cycles.
+	keep := func(id string) bool {
+		for cur, steps := id, 0; cur != "" && steps <= len(all); cur, steps = parent[cur], steps+1 {
+			if matched[cur] {
+				return true
+			}
+		}
+		return false
+	}
+
+	out := make([]identity.Compartment, 0, len(all))
+	for _, c := range all {
+		if keep(derefStr(c.Id)) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// isCompartmentOCID reports whether a --oci-compartments selector is an OCID
+// (compartment or tenancy) rather than a compartment name. Every OCI OCID
+// begins with the "ocid1." prefix.
+func isCompartmentOCID(s string) bool { return strings.HasPrefix(s, "ocid1.") }
 
 // newIdentityClient constructs a client using the resolved auth provider.
 // Identity is a regional service that defaults to the home region when no

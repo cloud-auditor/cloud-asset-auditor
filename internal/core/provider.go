@@ -46,14 +46,57 @@ type RegionsConfigurable interface {
 	SetRegions(regions []string)
 }
 
+// CompartmentsConfigurable receives the value of --oci-compartments before
+// Collect. Each entry is a compartment OCID or name; an empty list means
+// "every accessible compartment" (the default). The provider decides the
+// match semantics (the OCI provider is subtree-inclusive).
+type CompartmentsConfigurable interface {
+	SetCompartments(compartments []string)
+}
+
+// NetbirdConfigurable receives the value of --netbird-management-url before
+// Collect — the self-hosted Management API base URL. An empty value leaves the
+// provider's default (the NetBird cloud endpoint) in place. Providers that
+// aren't NetBird-shaped simply omit the method.
+type NetbirdConfigurable interface {
+	SetManagementURL(url string)
+}
+
+// TailscaleConfigurable receives the Tailscale-specific flags before Collect
+// — the tailnet to inventory (--tailscale-tailnet; empty keeps the token's
+// default tailnet) and the control-plane base URL (--tailscale-api-url, for
+// self-hosted / Headscale-compatible planes). Both are ignored when empty, so
+// the env-derived defaults survive. Providers that aren't Tailscale-shaped
+// simply omit the methods.
+type TailscaleConfigurable interface {
+	SetTailnet(name string)
+	SetAPIBaseURL(url string)
+}
+
+// GCPConfigurable receives the value of --gcp-scope / --gcp-project before
+// Collect — the Cloud Asset Inventory search scope (projects/folders/
+// organizations/<id>). An empty value leaves the provider's env-derived
+// default (GOOGLE_CLOUD_PROJECT / GCP_SCOPE) in place. Providers that aren't
+// GCP-shaped simply omit the method.
+type GCPConfigurable interface {
+	SetScope(scope string)
+}
+
 // KubeConfigurable bundles the Kubernetes-flag setters. They're always
 // applied together (context picks the cluster; namespace + excludes filter
-// what's listed; the helm-secrets toggle drops Helm release state), so one
-// interface keeps the type-assertion in the CLI tight. Providers that aren't
-// Kubernetes-shaped simply omit the methods.
+// what's listed; the helm-secrets and events toggles drop bookkeeping/ephemeral
+// objects), so one interface keeps the type-assertion in the CLI tight.
+// Providers that aren't Kubernetes-shaped simply omit the methods.
+//
+// SetKubeContext (singular) and SetKubeContexts (plural) coexist: the plural
+// form drives the multi-cluster scan (one audit fanned across several
+// kubeconfig contexts, or the literal "all" sentinel for every context), and
+// when set it takes precedence over the singular value.
 type KubeConfigurable interface {
 	SetKubeContext(name string)
+	SetKubeContexts(names []string)
 	SetKubeNamespace(ns string)
 	SetKubeExcludeNamespaces(ns []string)
 	SetKubeExcludeHelmSecrets(bool)
+	SetKubeExcludeEvents(bool)
 }

@@ -27,9 +27,13 @@ import (
 //	hostname=api.example.com          repeatable; filters to connected component
 //	include-orphans=true              keep nodes with no edges
 //	timeout=10m                       audit timeout
-//	format=json|dot|mermaid|excalidraw|html   default json
+//	format=json|dot|mermaid|d2|graphml|excalidraw|drawio|html   default json
+//	group_by=provider|account|region  cluster nodes; also the collapse bucket
+//	detail=low|medium|high            low = every asset (default); medium =
+//	                                  one node per group+type; high = one node
+//	                                  per group (the network-overview diagram)
 //
-// dot / mermaid / excalidraw / html responses come back as attachments
+// Non-json responses come back as attachments
 // with a sensible filename so dragging the URL into a file manager (or
 // letting curl follow Content-Disposition) saves something openable.
 func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +42,7 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	hostnames := q["hostname"]
 	includeOrphans := q.Get("include-orphans") == "true"
 	timeout := parseTimeoutParam(q.Get("timeout"))
+	kubeContexts, ctxWarn := validateKubeContexts(q.Get("kube_contexts"))
 	format := strings.ToLower(q.Get("format"))
 	if format == "" {
 		format = "json"
@@ -53,7 +58,10 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	assets, errs, initErrs := s.runProviders(ctx, providers)
+	assets, errs, initErrs := s.runProviders(ctx, providers, reqOptions{kubeContexts: kubeContexts})
+	if ctxWarn != "" {
+		initErrs = append(initErrs, ctxWarn)
+	}
 
 	var collected []core.Asset
 	var collectErrs []string
@@ -74,6 +82,8 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	topo := topology.Build(collected)
 	s.renderTopology(w, topo, topologyRenderOpts{
 		format:         format,
+		groupBy:        q.Get("group_by"),
+		detail:         q.Get("detail"),
 		hostnames:      hostnames,
 		includeOrphans: includeOrphans,
 		initErrs:       initErrs,
@@ -112,6 +122,8 @@ func (s *Server) handleTopologyBuild(w http.ResponseWriter, r *http.Request) {
 	topo := topology.Build(assets)
 	s.renderTopology(w, topo, topologyRenderOpts{
 		format:         format,
+		groupBy:        q.Get("group_by"),
+		detail:         q.Get("detail"),
 		hostnames:      q["hostname"],
 		includeOrphans: parseBoolParam(q.Get("include-orphans")),
 	})
@@ -159,6 +171,8 @@ func decodeAssetsBody(r io.Reader) ([]core.Asset, error) {
 // (client-supplied assets) handlers share one rendering tail.
 type topologyRenderOpts struct {
 	format         string
+	groupBy        string
+	detail         string
 	hostnames      []string
 	includeOrphans bool
 	initErrs       []string
@@ -166,12 +180,21 @@ type topologyRenderOpts struct {
 }
 
 func (s *Server) renderTopology(w http.ResponseWriter, topo *topology.Topology, opts topologyRenderOpts) {
+	detail, err := topology.ParseDetail(opts.detail)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	if len(opts.hostnames) > 0 {
 		topo = topo.FilterByHostname(opts.hostnames)
 	}
 	if !opts.includeOrphans {
 		topo = topo.DropOrphans()
 	}
+	// Collapse last — orphan-dropping and hostname tracing are statements
+	// about individual assets, so they must run while those are still present.
+	topo = topo.Collapse(detail, opts.groupBy)
 
 	// JSON keeps the historical envelope (nodes + edges + init_errors +
 	// errors) so existing clients aren't broken. Every other format goes
@@ -195,7 +218,7 @@ func (s *Server) renderTopology(w http.ResponseWriter, topo *topology.Topology, 
 		return
 	}
 
-	renderer, err := topology.New(opts.format)
+	renderer, err := topology.New(opts.format, topology.WithGroupBy(topology.RenderGroupBy(detail, opts.groupBy)))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -223,8 +246,14 @@ func topologyContentType(format string) (contentType, filename string) {
 		return "text/vnd.graphviz", "topology.dot"
 	case "mermaid":
 		return "text/plain; charset=utf-8", "topology.mmd"
+	case "d2":
+		return "text/plain; charset=utf-8", "topology.d2"
+	case "graphml":
+		return "application/graphml+xml", "topology.graphml"
 	case "excalidraw":
 		return "application/json", "topology.excalidraw"
+	case "drawio":
+		return "application/xml; charset=utf-8", "topology.drawio"
 	case "html":
 		return "text/html; charset=utf-8", "topology.html"
 	default:

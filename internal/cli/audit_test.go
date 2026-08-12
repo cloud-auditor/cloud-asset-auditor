@@ -1,12 +1,43 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/output"
 )
+
+type fakeProvider struct{ name string }
+
+func (f fakeProvider) Name() string                   { return f.name }
+func (f fakeProvider) Validate(context.Context) error { return nil }
+func (f fakeProvider) Collect(context.Context) (<-chan core.Asset, <-chan error) {
+	return nil, nil
+}
+
+// The audit cache keys on the providers that ACTUALLY run, not the raw
+// request. The "none" sentinel resolves to zero providers — so its key set is
+// empty and the audit command skips the cache entirely (it can't be confused
+// for a real provider's snapshot).
+func TestSelectProviders_NoneSentinelYieldsNoProviders(t *testing.T) {
+	if got := selectProviders([]string{"none"}); len(got) != 0 {
+		t.Errorf("selectProviders([none]) = %d providers, want 0", len(got))
+	}
+}
+
+func TestProviderNames_DerivesKeyFromRealizedProviders(t *testing.T) {
+	got := providerNames([]core.Provider{fakeProvider{"oci"}, fakeProvider{"netbird"}})
+	if len(got) != 2 || got[0] != "oci" || got[1] != "netbird" {
+		t.Errorf("providerNames = %v, want [oci netbird]", got)
+	}
+	if providerNames(nil) == nil {
+		// returns an empty, non-nil slice — fine either way, just shouldn't panic
+		t.Log("providerNames(nil) returned nil (acceptable)")
+	}
+}
 
 func TestBuildRenderer_SelectsFormat(t *testing.T) {
 	tests := []struct {

@@ -27,6 +27,30 @@ jobs:
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -1
 
+  web:
+    name: web ui in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # The Next.js export is committed to internal/server/webui/ so that
+      # `go build` needs no Node toolchain. That only holds if the committed
+      # tree matches the source — rebuild and diff, so a frontend change that
+      # forgot `just web` cannot merge with a stale bundle.
+      - name: Rebuild the export and compare
+        run: |
+          npm --prefix web ci --omit=optional
+          npm --prefix web run typecheck
+          npm --prefix web run build
+          if ! diff -r web/out internal/server/webui; then
+            echo "::error::internal/server/webui/ is stale — run 'just web' and commit the result."
+            exit 1
+          fi
+
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest
@@ -67,7 +91,7 @@ jobs:
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: gosec
-        run: gosec -exclude-dir=internal/server/web ./...
+        run: gosec -exclude-dir=internal/server/webui -exclude-dir=web ./...
 
   helm:
     name: helm lint

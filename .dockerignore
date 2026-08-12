@@ -32,3 +32,11 @@ deploy/helm/
 
 # Plan / claude / agent state
 .claude/
+
+# Frontend source. The Docker build compiles Go only — the web UI is already
+# built and committed under internal/server/webui/, which go:embed picks up.
+# Shipping web/ (and especially node_modules/) into the build context would
+# add tens of MB and slow every layer for files the build never reads.
+web/node_modules/
+web/.next/
+web/out/

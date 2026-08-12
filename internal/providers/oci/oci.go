@@ -29,6 +29,7 @@ const (
 type Config struct {
 	Profile        string   // ~/.oci/config profile name; "" means DEFAULT
 	Regions        []string // explicit list, or {"all"}, or empty for home region only
+	Compartments   []string // OCIDs or names to scan (subtree-inclusive); empty = every accessible compartment
 	MaxConcurrency int
 	IncludeRaw     bool
 }
@@ -61,11 +62,12 @@ type Provider struct {
 
 // Compile-time checks for the optional interfaces.
 var (
-	_ core.Provider                = (*Provider)(nil)
-	_ core.ConcurrencyConfigurable = (*Provider)(nil)
-	_ core.IncludeRawConfigurable  = (*Provider)(nil)
-	_ core.ProfileConfigurable     = (*Provider)(nil)
-	_ core.RegionsConfigurable     = (*Provider)(nil)
+	_ core.Provider                 = (*Provider)(nil)
+	_ core.ConcurrencyConfigurable  = (*Provider)(nil)
+	_ core.IncludeRawConfigurable   = (*Provider)(nil)
+	_ core.ProfileConfigurable      = (*Provider)(nil)
+	_ core.RegionsConfigurable      = (*Provider)(nil)
+	_ core.CompartmentsConfigurable = (*Provider)(nil)
 )
 
 func init() {
@@ -101,6 +103,8 @@ func (p *Provider) SetProfile(s string) {
 }
 
 func (p *Provider) SetRegions(regions []string) { p.cfg.Regions = regions }
+
+func (p *Provider) SetCompartments(compartments []string) { p.cfg.Compartments = compartments }
 
 // ensureAuth resolves credentials exactly once. Subsequent callers get the
 // cached result (or cached error).

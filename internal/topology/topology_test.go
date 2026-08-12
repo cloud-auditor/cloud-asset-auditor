@@ -422,6 +422,69 @@ func TestRenderer_Excalidraw_TextBoundToContainer(t *testing.T) {
 	}
 }
 
+func TestRenderer_Excalidraw_IconsAndFiles(t *testing.T) {
+	topo := topology.Build(canonicalChain()).DropOrphans()
+	r, _ := topology.New("excalidraw")
+	var buf bytes.Buffer
+	if err := r.Render(topo, &buf); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Elements []map[string]any          `json:"elements"`
+		Files    map[string]map[string]any `json:"files"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+
+	// One image element per node, each referencing a real entry in files.
+	images := 0
+	for _, el := range doc.Elements {
+		if el["type"] != "image" {
+			continue
+		}
+		images++
+		fileID, _ := el["fileId"].(string)
+		f, ok := doc.Files[fileID]
+		if !ok {
+			t.Errorf("image references fileId %q with no files entry", fileID)
+			continue
+		}
+		if mt, _ := f["mimeType"].(string); mt != "image/svg+xml" {
+			t.Errorf("file %q mimeType = %q, want image/svg+xml", fileID, mt)
+		}
+		if url, _ := f["dataURL"].(string); !strings.HasPrefix(url, "data:image/svg+xml;base64,") {
+			t.Errorf("file %q dataURL not a base64 svg data url: %q", fileID, url)
+		}
+	}
+	if images != len(topo.Nodes) {
+		t.Errorf("image elements = %d, want %d (one per node)", images, len(topo.Nodes))
+	}
+	if len(doc.Files) == 0 {
+		t.Error("no files emitted — icons missing")
+	}
+
+	// The rectangle + image + text of a node must share a groupId so they
+	// drag together in Excalidraw.
+	groups := map[string]int{}
+	for _, el := range doc.Elements {
+		ids, _ := el["groupIds"].([]any)
+		for _, g := range ids {
+			if s, ok := g.(string); ok {
+				groups[s]++
+			}
+		}
+	}
+	for g, n := range groups {
+		if n != 3 {
+			t.Errorf("group %q has %d members, want 3 (rect+image+text)", g, n)
+		}
+	}
+	if len(groups) != len(topo.Nodes) {
+		t.Errorf("groups = %d, want %d (one card per node)", len(groups), len(topo.Nodes))
+	}
+}
+
 func TestRenderer_Excalidraw_DeterministicSeeds(t *testing.T) {
 	// Same input → byte-identical output, so checking a diff produces
 	// nothing when the topology hasn't changed.

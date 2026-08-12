@@ -1,5 +1,6 @@
 # Built binaries
 /bin/
+/auditor
 *.test
 *.exe
 

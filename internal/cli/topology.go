@@ -1,14 +1,12 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/filter"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/topology"
 )
 
@@ -26,14 +24,24 @@ omits Raw to stay readable.
 
 Examples:
   auditor topology -o dot | dot -Tsvg > flow.svg
+  auditor topology -o dot --group-by provider | dot -Tsvg > flow.svg  # cluster per cloud
+
+  # High-level network diagram: one box per provider, arrows weighted by
+  # how many underlying relationships they stand for.
+  auditor topology --detail high -o dot | dot -Tsvg > overview.svg
+  auditor topology --detail medium --group-by account -o mermaid   # per account, per type
+
   auditor topology --hostname api.example.com -o mermaid
+  auditor topology -o d2 > topology.d2 && d2 topology.d2 topology.svg  # d2lang.com layout
+  auditor topology -o graphml > topology.graphml         # import into yEd / Gephi / Cytoscape
   auditor topology -o json | jq '.edges[] | select(.kind == "lb-backend")'
   auditor topology -o excalidraw > topology.excalidraw   # drag into excalidraw.com to edit
+  auditor topology -o drawio > topology.drawio           # open in draw.io / diagrams.net
   auditor topology -o html > topology.html               # self-contained interactive viewer
 
   # Build from a saved snapshot instead of a live audit (instant; pair
   # with 'audit -o json --include-raw' so the K8s resolvers see payloads):
-  auditor topology --from assets.json -o html > topology.html
+  auditor topology --from-snapshot assets.json -o html > topology.html
 `,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := s.v.BindPFlags(cmd.Flags()); err != nil {
@@ -41,15 +49,23 @@ Examples:
 			}
 			v := s.v
 
-			providers := v.GetStringSlice("provider")
 			format := v.GetString("output")
 			outFile := v.GetString("output-file")
 			hostnames := v.GetStringSlice("hostname")
 			includeOrphans := v.GetBool("include-orphans")
-			timeout := v.GetDuration("timeout")
-			maxConcurrency := v.GetInt("max-concurrency")
+			groupBy := v.GetString("group-by")
 
-			renderer, err := topology.New(format)
+			detail, err := topology.ParseDetail(v.GetString("detail"))
+			if err != nil {
+				return err
+			}
+
+			renderer, err := topology.New(format, topology.WithGroupBy(topology.RenderGroupBy(detail, groupBy)))
+			if err != nil {
+				return err
+			}
+
+			assetFilter, err := filter.Parse(v.GetStringSlice("filter"))
 			if err != nil {
 				return err
 			}
@@ -60,63 +76,22 @@ Examples:
 			}
 			defer closeOut()
 
-			var (
-				collected []core.Asset
-				provErrs  []error
-			)
-			if from := v.GetString("from"); from != "" {
-				// Snapshot path: no providers, no audit — the graph is
-				// built from a saved `audit -o json` file (array or
-				// NDJSON, sniffed by diff.Load via the same loadSnapshot
-				// the diff command uses). Mirrors POST /api/v1/topology.
-				collected, err = loadSnapshot(from)
-				if err != nil {
-					return err
-				}
-			} else {
-				ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
-				defer cancel()
-
-				selected := selectProviders(providers)
-				// Force --include-raw=true and apply other knobs. Resolvers
-				// parse Raw for Service / Ingress / HTTPRoute payloads — the
-				// graph would be empty for those without it.
-				applyProviderOptions(selected, providerOptions{
-					maxConcurrency:        maxConcurrency,
-					includeRaw:            true,
-					ociProfile:            v.GetString("oci-profile"),
-					ociRegions:            v.GetStringSlice("oci-regions"),
-					kubeContext:           v.GetString("kube-context"),
-					kubeNamespace:         v.GetString("kube-namespace"),
-					kubeExcludeNamespaces: v.GetStringSlice("kube-exclude-namespaces"),
-				})
-
-				// Materialize every asset before building the topology — the
-				// resolvers need the full set for index lookups, not a stream.
-				assets, errs := runProviders(ctx, selected)
-				collected = make([]core.Asset, 0, 1024)
-				errsDone := make(chan struct{})
-				go func() {
-					for e := range errs {
-						if e != nil {
-							provErrs = append(provErrs, e)
-						}
-					}
-					close(errsDone)
-				}()
-				for a := range assets {
-					collected = append(collected, a)
-				}
-				<-errsDone
+			collected, provErrs, err := s.gatherForGraph(cmd.Context(), v)
+			if err != nil {
+				return err
 			}
 
-			topo := topology.Build(collected)
+			topo := topology.Build(assetFilter.Slice(collected))
 			if len(hostnames) > 0 {
 				topo = topo.FilterByHostname(hostnames)
 			}
 			if !includeOrphans {
 				topo = topo.DropOrphans()
 			}
+			// Collapse last: orphan-dropping and hostname tracing are
+			// statements about individual assets, so they must run while the
+			// individual assets are still there to be filtered.
+			topo = topo.Collapse(detail, groupBy)
 
 			if err := renderer.Render(topo, w); err != nil {
 				return err
@@ -128,26 +103,17 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringSlice("provider", nil,
-		`providers to run (default: all registered; use "none" to run zero)`)
-	cmd.Flags().String("from", "",
-		"build the graph from a saved 'audit -o json' snapshot instead of running a live audit")
-	cmd.Flags().StringP("output", "o", "json", "output format: json|dot|mermaid|excalidraw|html")
+	cmd.Flags().StringP("output", "o", "json", "output format: json|dot|mermaid|d2|graphml|excalidraw|drawio|html")
 	cmd.Flags().String("output-file", "", "write output to this file instead of stdout")
 	cmd.Flags().StringSlice("hostname", nil, "trace only these hostnames (default: all)")
+	cmd.Flags().StringArray("filter", nil,
+		`build the graph from matching assets only: key=value[,value...] / key!=... with key provider|account|region|type|id|name|status|tag:KEY and glob values; repeatable (ANDed)`)
 	cmd.Flags().Bool("include-orphans", false, "include asset nodes that have no edges")
-	cmd.Flags().Int("max-concurrency", 5, "per-provider parallelism (mirrors `audit`)")
-	cmd.Flags().Duration("timeout", 10*time.Minute, "overall audit + resolve timeout")
+	cmd.Flags().String("group-by", "",
+		"cluster nodes by provider|account|region in the dot/mermaid/d2/drawio renderers (default: flat)")
+	cmd.Flags().String("detail", "low",
+		"diagram detail: low (every asset) | medium (one node per group+type) | high (one node per group). medium/high bucket by --group-by, defaulting to provider")
 
-	// Provider-scoped flags mirrored from `audit` so a single invocation
-	// can target the same cluster / tenancy / profile.
-	cmd.Flags().String("oci-profile", "", "OCI config profile name")
-	cmd.Flags().StringSlice("oci-regions", nil, `OCI regions to scan (default: every subscribed region)`)
-	cmd.Flags().String("kube-context", "", "kubeconfig context name")
-	cmd.Flags().String("kube-namespace", "", "limit Kubernetes audit to a single namespace")
-	cmd.Flags().StringSlice("kube-exclude-namespaces",
-		[]string{"kube-system", "kube-public", "kube-node-lease"},
-		"Kubernetes namespaces to skip")
-
+	addGraphSourceFlags(cmd)
 	return cmd
 }

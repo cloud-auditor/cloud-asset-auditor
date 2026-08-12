@@ -51,6 +51,11 @@ func TestSetters(t *testing.T) {
 		t.Errorf("Regions = %v", p.cfg.Regions)
 	}
 
+	p.SetCompartments([]string{"Production", "ocid1.compartment.oc1..abc"})
+	if len(p.cfg.Compartments) != 2 || p.cfg.Compartments[0] != "Production" {
+		t.Errorf("Compartments = %v", p.cfg.Compartments)
+	}
+
 	p.SetIncludeRaw(true)
 	if !p.cfg.IncludeRaw {
 		t.Error("SetIncludeRaw(true) didn't apply")
@@ -276,6 +281,65 @@ func TestResolveRegions_ExplicitList(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("[%d] got %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestFilterCompartments(t *testing.T) {
+	// A small tree:
+	//   root
+	//   ├── Production (prod)
+	//   │   └── Web (web, child of prod)
+	//   └── Sandbox (sandbox)
+	root := identity.Compartment{Id: ptrString("ocid1.tenancy.oc1..root"), Name: ptrString("(tenancy root)"), CompartmentId: nil}
+	prod := identity.Compartment{Id: ptrString("ocid1.compartment.oc1..prod"), Name: ptrString("Production"), CompartmentId: ptrString("ocid1.tenancy.oc1..root")}
+	web := identity.Compartment{Id: ptrString("ocid1.compartment.oc1..web"), Name: ptrString("Web"), CompartmentId: ptrString("ocid1.compartment.oc1..prod")}
+	sandbox := identity.Compartment{Id: ptrString("ocid1.compartment.oc1..sandbox"), Name: ptrString("Sandbox"), CompartmentId: ptrString("ocid1.tenancy.oc1..root")}
+	all := []identity.Compartment{root, prod, web, sandbox}
+
+	ids := func(cs []identity.Compartment) []string {
+		out := make([]string, len(cs))
+		for i, c := range cs {
+			out[i] = derefStr(c.Id)
+		}
+		return out
+	}
+
+	cases := []struct {
+		name string
+		want []string // selectors
+		ids  []string // expected compartment OCIDs, in input order
+	}{
+		{"empty selector keeps all", nil, []string{"ocid1.tenancy.oc1..root", "ocid1.compartment.oc1..prod", "ocid1.compartment.oc1..web", "ocid1.compartment.oc1..sandbox"}},
+		{"by name pulls in subtree", []string{"Production"}, []string{"ocid1.compartment.oc1..prod", "ocid1.compartment.oc1..web"}},
+		{"by name is case-insensitive", []string{"production"}, []string{"ocid1.compartment.oc1..prod", "ocid1.compartment.oc1..web"}},
+		{"leaf by name selects only itself", []string{"Web"}, []string{"ocid1.compartment.oc1..web"}},
+		{"by OCID exact", []string{"ocid1.compartment.oc1..sandbox"}, []string{"ocid1.compartment.oc1..sandbox"}},
+		{"root selects the whole tree", []string{"ocid1.tenancy.oc1..root"}, []string{"ocid1.tenancy.oc1..root", "ocid1.compartment.oc1..prod", "ocid1.compartment.oc1..web", "ocid1.compartment.oc1..sandbox"}},
+		{"multiple selectors union", []string{"Web", "Sandbox"}, []string{"ocid1.compartment.oc1..web", "ocid1.compartment.oc1..sandbox"}},
+		{"no match yields empty", []string{"Nonexistent"}, nil},
+		{"blank entries ignored", []string{"  ", "Sandbox"}, []string{"ocid1.compartment.oc1..sandbox"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ids(filterCompartments(all, c.want))
+			if len(got) != len(c.ids) {
+				t.Fatalf("got %v, want %v", got, c.ids)
+			}
+			for i := range c.ids {
+				if got[i] != c.ids[i] {
+					t.Errorf("[%d] got %q, want %q", i, got[i], c.ids[i])
+				}
+			}
+		})
+	}
+}
+
+func TestIsCompartmentOCID(t *testing.T) {
+	if !isCompartmentOCID("ocid1.compartment.oc1..abc") || !isCompartmentOCID("ocid1.tenancy.oc1..root") {
+		t.Error("OCIDs should be detected")
+	}
+	if isCompartmentOCID("Production") || isCompartmentOCID("") {
+		t.Error("names should not be detected as OCIDs")
 	}
 }
 

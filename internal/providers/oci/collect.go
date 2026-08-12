@@ -38,6 +38,16 @@ func (p *Provider) run(ctx context.Context, assets chan<- core.Asset, errs chan<
 		return
 	}
 
+	// Narrow to --oci-compartments (subtree-inclusive) when set. A selector
+	// that matches nothing is almost always a typo, so surface it as a
+	// (non-fatal) error; tenancy-global IAM still collects below.
+	if len(p.cfg.Compartments) > 0 {
+		compartments = filterCompartments(compartments, p.cfg.Compartments)
+		if len(compartments) == 0 {
+			emitErr(ctx, errs, fmt.Errorf("oci compartments: --oci-compartments %v matched no accessible compartment", p.cfg.Compartments))
+		}
+	}
+
 	for _, c := range compartments {
 		if !sendAsset(ctx, assets, p.compartmentToAsset(c)) {
 			return

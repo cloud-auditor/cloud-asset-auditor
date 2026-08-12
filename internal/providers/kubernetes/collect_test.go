@@ -233,6 +233,54 @@ func TestValidate_ServerVersionError(t *testing.T) {
 	}
 }
 
+func TestMergeCluster_ForwardsAssetsAndPrefixesErrors(t *testing.T) {
+	srcA := make(chan core.Asset, 2)
+	srcE := make(chan error, 2)
+	srcA <- core.Asset{Provider: "kubernetes", Name: "pod-1"}
+	srcE <- errors.New("boom")
+	close(srcA)
+	close(srcE)
+
+	dstA := make(chan core.Asset, 4)
+	dstE := make(chan error, 4)
+	mergeCluster(context.Background(), "ctx-a", srcA, srcE, dstA, dstE)
+	close(dstA)
+	close(dstE)
+
+	var assets []core.Asset
+	for a := range dstA {
+		assets = append(assets, a)
+	}
+	var errs []error
+	for e := range dstE {
+		errs = append(errs, e)
+	}
+	if len(assets) != 1 || assets[0].Name != "pod-1" {
+		t.Fatalf("assets = %v, want one pod-1", assets)
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), `context "ctx-a": boom`) {
+		t.Fatalf("errs = %v, want context-prefixed 'boom'", errs)
+	}
+}
+
+func TestMergeCluster_EmptyContextLeavesErrorUnprefixed(t *testing.T) {
+	srcE := make(chan error, 1)
+	srcE <- errors.New("plain")
+	close(srcE)
+	srcA := make(chan core.Asset)
+	close(srcA)
+
+	dstA := make(chan core.Asset, 1)
+	dstE := make(chan error, 1)
+	mergeCluster(context.Background(), "", srcA, srcE, dstA, dstE)
+	close(dstE)
+
+	e := <-dstE
+	if e.Error() != "plain" {
+		t.Errorf("error = %q, want unprefixed 'plain' for empty context", e.Error())
+	}
+}
+
 func TestEmitErr(t *testing.T) {
 	// Delivered when the channel has room.
 	errs := make(chan error, 1)

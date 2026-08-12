@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/kubecontext"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/metrics"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/output"
 )
@@ -31,6 +32,35 @@ func (s *Server) handleProviders(w http.ResponseWriter, _ *http.Request) {
 	}{
 		Providers: core.Registered(),
 		AuthMode:  s.cfg.AuthMode,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleKubeContexts returns the contexts defined in the server's kubeconfig
+// (KUBECONFIG / ~/.kube/config) so the UI can offer a "scan these clusters"
+// picker. These are not credentials — they only name clusters the operator
+// already configured; the audit handlers validate any requested context
+// against this same set before scanning.
+//
+// Always 200: an absent kubeconfig (or running in-cluster) returns an empty
+// list, which the UI renders as "no contexts to choose from" rather than an
+// error. A genuine kubeconfig parse failure is reported in the "error" field
+// with an otherwise-empty list.
+func (s *Server) handleKubeContexts(w http.ResponseWriter, _ *http.Request) {
+	names, current, err := kubecontext.List()
+	resp := struct {
+		Contexts []string `json:"contexts"`
+		Current  string   `json:"current"`
+		Error    string   `json:"error,omitempty"`
+	}{
+		Contexts: names,
+		Current:  current,
+	}
+	if resp.Contexts == nil {
+		resp.Contexts = []string{}
+	}
+	if err != nil {
+		resp.Error = err.Error()
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -61,11 +91,15 @@ func (s *Server) handleAuditSSE(w http.ResponseWriter, r *http.Request) {
 
 	providers := parseProvidersParam(r.URL.Query().Get("providers"))
 	timeout := parseTimeoutParam(r.URL.Query().Get("timeout"))
+	kubeContexts, ctxWarn := validateKubeContexts(r.URL.Query().Get("kube_contexts"))
 
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	assets, errs, initErrs := s.runProviders(ctx, providers)
+	assets, errs, initErrs := s.runProviders(ctx, providers, reqOptions{kubeContexts: kubeContexts})
+	if ctxWarn != "" {
+		initErrs = append(initErrs, ctxWarn)
+	}
 	for _, msg := range initErrs {
 		_ = sse.emit("init_error", map[string]string{"message": msg})
 	}
@@ -123,11 +157,15 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 
 	providers := parseProvidersParam(r.URL.Query().Get("providers"))
 	timeout := parseTimeoutParam(r.URL.Query().Get("timeout"))
+	kubeContexts, ctxWarn := validateKubeContexts(r.URL.Query().Get("kube_contexts"))
 
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	assets, errs, initErrs := s.runProviders(ctx, providers)
+	assets, errs, initErrs := s.runProviders(ctx, providers, reqOptions{kubeContexts: kubeContexts})
+	if ctxWarn != "" {
+		initErrs = append(initErrs, ctxWarn)
+	}
 
 	// Drain errors in background — export endpoint discards them. Init
 	// errors get logged as a response header so the operator can see
@@ -188,6 +226,48 @@ func parseProvidersParam(raw string) []string {
 		}
 	}
 	return out
+}
+
+// validateKubeContexts parses the comma-separated kube_contexts query param
+// and keeps only contexts that actually exist in the server's kubeconfig (plus
+// the "all" sentinel). This is the security boundary for the per-request
+// context knob: a browser can pick among the operator's existing clusters but
+// can't inject an arbitrary context name. Returns the accepted contexts and,
+// when some were dropped, a single human-readable warning for the UI.
+func validateKubeContexts(raw string) (accepted []string, warning string) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, ""
+	}
+
+	known, _, err := kubecontext.List()
+	if err != nil {
+		return nil, "kube_contexts ignored: " + err.Error()
+	}
+	knownSet := make(map[string]struct{}, len(known))
+	for _, n := range known {
+		knownSet[n] = struct{}{}
+	}
+
+	var dropped []string
+	for _, part := range strings.Split(raw, ",") {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		if strings.EqualFold(name, "all") {
+			// "all" expands server-side against this same kubeconfig — safe.
+			return []string{"all"}, ""
+		}
+		if _, ok := knownSet[name]; ok {
+			accepted = append(accepted, name)
+		} else {
+			dropped = append(dropped, name)
+		}
+	}
+	if len(dropped) > 0 {
+		warning = "ignored unknown kube context(s): " + strings.Join(dropped, ", ")
+	}
+	return accepted, warning
 }
 
 // parseBoolParam treats the common truthy spellings ("1", "true", "yes", "on",

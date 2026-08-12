@@ -96,6 +96,16 @@ func isHelmReleaseSecret(u *unstructured.Unstructured) bool {
 	return strings.HasPrefix(u.GetName(), "sh.helm.release.v")
 }
 
+// isEventResource reports whether a (group, resource) is the cluster's Event
+// type — the high-volume, ephemeral records that --kube-exclude-events drops at
+// discovery (so we never list them at all). Events live in two API groups: the
+// legacy core group ("" / v1) and the dedicated events.k8s.io group; both use
+// the resource name "events". Matching on group keeps an unrelated CRD named
+// "events" in some other group from being skipped.
+func isEventResource(group, resource string) bool {
+	return resource == "events" && (group == "" || group == "events.k8s.io")
+}
+
 // isSubresource reports whether an APIResource name represents a
 // subresource (status, scale, etc.). Those have "parent/sub" names; we
 // never list them as top-level inventory items.
