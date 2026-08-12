@@ -1,0 +1,430 @@
+/*
+ * Assets page styles.
+ *
+ * Imported from app/assets/page.tsx. Everything here is either scoped to a
+ * page-specific class (`.assets-*`, `.acell*`) or belongs to a component only
+ * this page mounts (`.facet*`, `.json-block`, `.asset-drawer`) — nothing
+ * restyles a shared class from globals.css, which another agent owns.
+ *
+ * Sizes are in tokens throughout; the two raw pixel values that appear
+ * (popover offsets, checkbox box) are geometry, not colour.
+ */
+
+/* ---------- toolbar ---------- */
+
+/* Sticky under the topbar rather than inside the table card: a card with
+   `overflow: hidden` (which .card.flush needs for its rounded table corners)
+   cannot contain a sticky child. */
+.assets-toolbar {
+  position: sticky;
+  top: calc(var(--topbar-h) + 8px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.assets-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.assets-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 260px;
+  min-width: 200px;
+  padding: 0 8px 0 10px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-faint);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.assets-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.assets-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+.assets-search input:focus-visible {
+  outline: none;
+  border-color: transparent;
+}
+.assets-search .kbd { flex: none; }
+
+.assets-count {
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.assets-count[data-stale='true'] { opacity: 0.55; }
+
+.assets-density button { gap: 5px; }
+
+.assets-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+  border-top: 1px solid var(--border);
+}
+.assets-chips .chip { max-width: 280px; }
+.assets-chips .chip .faint {
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.05em;
+}
+.assets-chips .chip .x svg { display: block; }
+
+/* ---------- table ---------- */
+
+.assets-card { overflow: hidden; }
+
+/* A viewport-relative height so the window is as tall as the screen allows and
+   the page itself never scrolls the table out of reach. The floor keeps it
+   usable when the audit bar is expanded on a short laptop screen. */
+.assets-table {
+  height: clamp(280px, calc(100vh - 330px), 1400px);
+}
+
+.acell {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.acell-glyph {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-faint);
+}
+.vrow:hover .acell-glyph { color: var(--text-dim); }
+
+/* Name over id. A grid rather than a flex column because the two lines must
+   share the cell's height without either one being able to push the other out
+   of a fixed-height row. */
+.acell-name {
+  display: grid;
+  grid-auto-rows: min-content;
+  align-content: center;
+  gap: 0;
+  line-height: 1.3;
+}
+.acell-name .mono { font-size: var(--fs-micro); }
+
+.assets-status {
+  height: 20px;
+  max-width: 100%;
+  padding: 0 8px;
+  border-color: color-mix(in srgb, currentColor 32%, transparent);
+  background: color-mix(in srgb, currentColor 11%, transparent);
+}
+
+.assets-addr {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  max-width: 100%;
+}
+.assets-addr:hover:not(:disabled) {
+  background: transparent;
+  color: var(--accent);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* ---------- facet / menu popovers ---------- */
+
+.facet { position: relative; }
+
+.facet-trigger { gap: 5px; }
+.facet-trigger .facet-caret {
+  transform: rotate(90deg);
+  color: var(--text-faint);
+  flex: none;
+}
+
+/* .popover is `position: absolute` already; these four rules only decide which
+   corner it hangs from. Flipping is a data attribute rather than a computed
+   `top`, so the panel keeps its own layout and the browser does the maths. */
+.facet-pop {
+  top: calc(100% + 6px);
+  left: 0;
+  width: 262px;
+  max-height: min(58vh, 400px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.facet-pop[data-align='end'] { left: auto; right: 0; }
+.facet-pop[data-up='true'] { top: auto; bottom: calc(100% + 6px); }
+
+.facet-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-faint);
+}
+.facet-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+}
+.facet-search input:focus-visible { outline: none; border-color: transparent; }
+
+.facet-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.facet-list {
+  flex: 1;
+  overflow: auto;
+  padding: 5px;
+  overscroll-behavior: contain;
+}
+.facet-none { padding: 10px; margin: 0; }
+
+.facet-item { cursor: pointer; }
+.facet-item .mono { font-size: var(--fs-xs); }
+
+/* A drawn box rather than <input type=checkbox>: the option is a
+   role="option" with aria-selected, so a real checkbox would announce a second,
+   competing state. */
+.facet-box {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--accent-ink);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.facet-box[data-on='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.facet-box svg { display: block; }
+
+.menu-pop { width: 232px; }
+.menu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px;
+}
+.menu-group .item { text-decoration: none; }
+.menu-group a.item:hover { text-decoration: none; }
+.menu-note {
+  padding: 4px 8px 2px;
+  margin: 2px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- drawer ---------- */
+
+.asset-drawer-glyph {
+  display: inline-flex;
+  flex: none;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.asset-drawer-title {
+  display: grid;
+  min-width: 0;
+  line-height: 1.3;
+}
+.asset-drawer-title strong { font-size: var(--fs-md); }
+
+.asset-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-weight: 400;
+}
+.asset-id:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
+.asset-id svg { flex: none; }
+
+.asset-fields {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) 1fr;
+  gap: 5px 14px;
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.asset-fields dt {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 650;
+  padding-top: 1px;
+}
+.asset-fields dd {
+  margin: 0;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.asset-section { display: flex; flex-direction: column; gap: 8px; }
+.asset-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-dim);
+}
+.asset-section p { margin: 0; }
+.asset-section code { font-size: var(--fs-xs); color: var(--text-dim); }
+
+.asset-tags {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.asset-tag {
+  display: grid;
+  grid-template-columns: minmax(90px, 38%) 1fr;
+  border-bottom: 1px solid var(--border);
+}
+.asset-tag:last-child { border-bottom: 0; }
+.asset-tag button {
+  justify-content: flex-start;
+  text-align: left;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Doubled-up selectors, not !important: `button:hover:not(:disabled)` in
+   globals.css out-specifies a bare class, so the override has to match it. */
+.asset-tag .asset-tag-k {
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+}
+.asset-tag .asset-tag-k:hover:not(:disabled) { background: var(--surface-3); color: var(--accent); }
+.asset-tag .asset-tag-v { color: var(--text); }
+.asset-tag .asset-tag-v:hover:not(:disabled) { background: var(--surface-2); }
+
+/* ---------- json view ---------- */
+
+.json-block { position: relative; }
+/* Two classes deep so it out-specifies `.btn.ghost`'s transparent background. */
+.json-block .json-copy {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 1;
+  background: var(--surface-3);
+  border-color: var(--border);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.json-block:hover .json-copy,
+.json-block .json-copy:focus-visible { opacity: 1; }
+
+.json-view { max-height: 380px; }
+.json-row { white-space: pre; }
+
+.json-toggle {
+  display: inline;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+}
+.json-toggle:hover:not(:disabled) { background: var(--accent-soft); }
+.json-caret {
+  display: inline-flex;
+  width: 1ch;
+  margin-left: -1ch;
+  color: var(--text-faint);
+  transition: transform var(--dur-fast) var(--ease);
+  vertical-align: -1px;
+}
+.json-caret[data-open='true'] { transform: rotate(90deg); }
+.json-fold { color: var(--text-faint); }
+
+.json-more {
+  padding: 0 6px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+}
+.json-more:hover:not(:disabled) { color: var(--accent); border-color: var(--accent-line); }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 900px) {
+  .assets-toolbar { top: calc(var(--topbar-h) + 4px); }
+  .assets-count { order: 10; }
+}
+
+@media (max-width: 720px) {
+  /* The toolbar wraps to three or four rows on a phone; sticking it to the top
+     would leave almost no table. */
+  .assets-toolbar { position: static; }
+  .assets-table { height: clamp(260px, calc(100vh - 260px), 1400px); }
+  .facet-pop { width: min(262px, calc(100vw - 32px)); }
+  .asset-tag { grid-template-columns: 1fr; }
+  .asset-tag .asset-tag-k { border-right: 0; border-bottom: 1px solid var(--border); }
+}

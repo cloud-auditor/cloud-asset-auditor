@@ -64,6 +64,11 @@ func TestSetters(t *testing.T) {
 		t.Error("ExcludeHelmSecrets not set")
 	}
 
+	p.SetKubeExcludeEvents(true)
+	if !p.cfg.ExcludeEvents {
+		t.Error("ExcludeEvents not set")
+	}
+
 	p.SetIncludeRaw(true)
 	if !p.cfg.IncludeRaw {
 		t.Error("IncludeRaw not set")
@@ -150,6 +155,27 @@ func TestFormatType(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if got := formatType(c.apiVersion, c.kind); got != c.want {
 				t.Errorf("formatType(%q,%q) = %q, want %q", c.apiVersion, c.kind, got, c.want)
+			}
+		})
+	}
+}
+
+func TestIsEventResource(t *testing.T) {
+	cases := []struct {
+		name            string
+		group, resource string
+		want            bool
+	}{
+		{"core group events", "", "events", true},
+		{"events.k8s.io events", "events.k8s.io", "events", true},
+		{"CRD named events in another group", "example.com", "events", false},
+		{"non-event core resource", "", "pods", false},
+		{"event-ish resource name in events group", "events.k8s.io", "eventseries", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isEventResource(c.group, c.resource); got != c.want {
+				t.Errorf("isEventResource(%q, %q) = %v, want %v", c.group, c.resource, got, c.want)
 			}
 		})
 	}
@@ -317,6 +343,7 @@ func TestFilterResources(t *testing.T) {
 				{Name: "pods/status", Namespaced: true, Kind: "Pod", Verbs: []string{"get", "list"}}, // subresource → drop
 				{Name: "nodes", Namespaced: false, Kind: "Node", Verbs: []string{"get"}},             // no list → drop
 				{Name: "services", Namespaced: true, Kind: "Service", Verbs: []string{"list", "watch"}},
+				{Name: "events", Namespaced: true, Kind: "Event", Verbs: []string{"list"}}, // core-group events
 			},
 		},
 		{
@@ -327,21 +354,49 @@ func TestFilterResources(t *testing.T) {
 			},
 		},
 		{
+			GroupVersion: "events.k8s.io/v1",
+			APIResources: []metav1.APIResource{
+				{Name: "events", Namespaced: true, Kind: "Event", Verbs: []string{"list"}}, // dedicated events group
+			},
+		},
+		{
 			GroupVersion: "example.com/v1",
 			APIResources: []metav1.APIResource{
-				{Name: "widgets", Namespaced: true, Kind: "Widget", Verbs: []string{"list"}}, // CRD comes for free
+				{Name: "widgets", Namespaced: true, Kind: "Widget", Verbs: []string{"list"}},    // CRD comes for free
+				{Name: "events", Namespaced: true, Kind: "AuditEvent", Verbs: []string{"list"}}, // CRD named "events" in another group → kept even when events excluded
 			},
 		},
 	}
-	got := filterResources(in)
+
 	// Sort is by GVR.String(); core-group resources render as "/v1, Resource=..."
 	// and "/" (ASCII 47) sorts before letters.
-	want := []string{
-		"/v1, Resource=pods",
-		"/v1, Resource=services",
-		"apps/v1, Resource=deployments",
-		"example.com/v1, Resource=widgets",
-	}
+	// events.k8s.io is deliberately absent: it and the core group project the
+	// same stored objects, so listing both collected every event twice under
+	// one UID. See filterResources for why the core group is the one kept.
+	t.Run("keeps events by default, from one group only", func(t *testing.T) {
+		assertGVRs(t, filterResources(in, false), []string{
+			"/v1, Resource=events",
+			"/v1, Resource=pods",
+			"/v1, Resource=services",
+			"apps/v1, Resource=deployments",
+			"example.com/v1, Resource=events",
+			"example.com/v1, Resource=widgets",
+		})
+	})
+
+	t.Run("excludeEvents drops both event groups but not a same-named CRD", func(t *testing.T) {
+		assertGVRs(t, filterResources(in, true), []string{
+			"/v1, Resource=pods",
+			"/v1, Resource=services",
+			"apps/v1, Resource=deployments",
+			"example.com/v1, Resource=events", // CRD in a different group survives
+			"example.com/v1, Resource=widgets",
+		})
+	})
+}
+
+func assertGVRs(t *testing.T, got []resourceTarget, want []string) {
+	t.Helper()
 	if len(got) != len(want) {
 		t.Fatalf("got %d targets, want %d: %v", len(got), len(want), got)
 	}
@@ -487,5 +542,55 @@ func TestRawOf_RoundTrip(t *testing.T) {
 	}
 	if back["kind"] != "ConfigMap" {
 		t.Errorf("Raw.kind = %v", back["kind"])
+	}
+}
+
+// Objects the API server computes rather than stores carry no UID —
+// metrics.k8s.io PodMetrics/NodeMetrics and ComponentStatus are the ones a
+// real cluster serves. They used to all map to the empty id, which collapses
+// them into one entry everywhere identity is (provider, id): diff, the
+// topology index, and the audit cache.
+func TestUnstructuredToAsset_SynthesizesIDWhenUIDIsEmpty(t *testing.T) {
+	p := &Provider{clusterID: "prod"}
+
+	namespaced := p.unstructuredToAsset(&unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1",
+		"kind":       "PodMetrics",
+		"metadata":   map[string]any{"name": "api-7d9f", "namespace": "payments"},
+	}})
+	if got, want := namespaced.ID, "k8s/metrics.k8s.io/v1beta1/PodMetrics/payments/api-7d9f"; got != want {
+		t.Errorf("namespaced id = %q, want %q", got, want)
+	}
+
+	clusterScoped := p.unstructuredToAsset(&unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ComponentStatus",
+		"metadata":   map[string]any{"name": "scheduler"},
+	}})
+	if got, want := clusterScoped.ID, "k8s/v1/ComponentStatus/scheduler"; got != want {
+		t.Errorf("cluster-scoped id = %q, want %q", got, want)
+	}
+
+	// Two same-named objects in different namespaces must not collide, which
+	// is the whole point of including the namespace.
+	other := p.unstructuredToAsset(&unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1",
+		"kind":       "PodMetrics",
+		"metadata":   map[string]any{"name": "api-7d9f", "namespace": "orders"},
+	}})
+	if other.ID == namespaced.ID {
+		t.Errorf("same name in two namespaces produced the same id %q", other.ID)
+	}
+}
+
+func TestUnstructuredToAsset_RealUIDWins(t *testing.T) {
+	p := &Provider{clusterID: "prod"}
+	a := p.unstructuredToAsset(&unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "api", "namespace": "default", "uid": "abc-123"},
+	}})
+	if a.ID != "abc-123" {
+		t.Errorf("id = %q, want the object's own UID", a.ID)
 	}
 }

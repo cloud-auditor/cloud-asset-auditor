@@ -1,0 +1,32 @@
+{
+  "name": "auditor-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js frontend for the cloud asset auditor. Statically exported and embedded into the Go binary \u2014 see web/README.md.",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "//optional": [
+    "sharp is next's optional image-optimization engine. This app is a static",
+    "export with images.unoptimized=true, so sharp is never invoked \u2014 but it",
+    "ships a vulnerable native libvips and would be installed by default.",
+    "Install with `npm ci --omit=optional` (what `just web` does) to skip it.",
+    "Versions are pinned exactly, not caret-ranged: the build output is",
+    "committed to internal/server/webui/, so a floating dependency would make",
+    "the committed bundle unreproducible."
+  ],
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "typescript": "5.7.2"
+  }
+}

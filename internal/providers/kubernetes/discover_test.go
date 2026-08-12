@@ -76,14 +76,14 @@ func TestFilterResources_SkipsInvalidGroupVersion(t *testing.T) {
 			},
 		},
 	}
-	got := filterResources(in)
+	got := filterResources(in, false)
 	if len(got) != 1 || got[0].GVR.Resource != "pods" {
 		t.Fatalf("got %v, want only pods (invalid GroupVersion dropped)", got)
 	}
 }
 
 func TestFilterResources_EmptyAndDegenerateInputs(t *testing.T) {
-	if got := filterResources(nil); len(got) != 0 {
+	if got := filterResources(nil, false); len(got) != 0 {
 		t.Errorf("nil input → %v, want empty", got)
 	}
 	in := []*metav1.APIResourceList{
@@ -103,7 +103,7 @@ func TestFilterResources_EmptyAndDegenerateInputs(t *testing.T) {
 			},
 		},
 	}
-	got := filterResources(in)
+	got := filterResources(in, false)
 	if len(got) != 2 {
 		t.Fatalf("got %d targets, want 2 (things + jobs): %v", len(got), got)
 	}
@@ -121,5 +121,63 @@ func TestFilterResources_EmptyAndDegenerateInputs(t *testing.T) {
 		if !found {
 			t.Errorf("missing %q in %v", want, resources)
 		}
+	}
+}
+
+// Events are one stored object served through two API groups. Listing both
+// collects every event twice under the same UID, which double-counts the
+// inventory and collides on the (provider, id) identity that diff, the
+// topology index, and the cache all key on.
+func TestFilterResources_EventsAreCollectedOnce(t *testing.T) {
+	lists := []*metav1.APIResourceList{
+		{
+			GroupVersion: "v1",
+			APIResources: []metav1.APIResource{
+				{Name: "events", Kind: "Event", Namespaced: true, Verbs: []string{"list"}},
+				{Name: "pods", Kind: "Pod", Namespaced: true, Verbs: []string{"list"}},
+			},
+		},
+		{
+			GroupVersion: "events.k8s.io/v1",
+			APIResources: []metav1.APIResource{
+				{Name: "events", Kind: "Event", Namespaced: true, Verbs: []string{"list"}},
+			},
+		},
+	}
+
+	got := filterResources(lists, false)
+	var events []string
+	for _, t := range got {
+		if t.GVR.Resource == "events" {
+			events = append(events, t.GVR.String())
+		}
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected exactly one events GVR, got %v", events)
+	}
+	if events[0] != "/v1, Resource=events" {
+		t.Errorf("kept %q, want the core group — it is the one every cluster serves", events[0])
+	}
+
+	// A CRD that happens to be called "events" in someone else's group is a
+	// different resource entirely and must survive.
+	withCRD := append(lists, &metav1.APIResourceList{
+		GroupVersion: "example.com/v1",
+		APIResources: []metav1.APIResource{
+			{Name: "events", Kind: "Event", Namespaced: true, Verbs: []string{"list"}},
+		},
+	})
+	var kept int
+	for _, tgt := range filterResources(withCRD, false) {
+		if tgt.GVR.Resource == "events" {
+			kept++
+		}
+	}
+	if kept != 2 {
+		t.Errorf("core event + unrelated CRD should both survive, got %d", kept)
+	}
+
+	if n := len(filterResources(lists, true)); n != 1 {
+		t.Errorf("--kube-exclude-events must still drop both groups, got %d targets", n)
 	}
 }

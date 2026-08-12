@@ -1,0 +1,7 @@
+# Build inputs/outputs. The *export* is not ignored here — it is copied to
+# internal/server/webui/ and committed, so `go build` works without Node.
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo

@@ -1,0 +1,309 @@
+/*
+ * Exposure page.
+ *
+ * Page-local because none of it is reusable vocabulary: a chain of node pills
+ * joined by kind-coloured connectors only means anything where a *path* is the
+ * unit of display. The shared pieces — .card, .path, .asset-chip, .stat,
+ * .segmented, .chip, .count-badge — come from globals.css and are only
+ * extended here.
+ *
+ * Every new class is prefixed `exp-`. An imported stylesheet in the App Router
+ * is global, not scoped, so an unprefixed `.chain` here would silently restyle
+ * another page's markup.
+ */
+
+/* ---------- query form ---------- */
+
+.exp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.exp-modes {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* The control scrolls rather than wrapping: a segmented control that breaks
+   onto two lines loses the sliding thumb's meaning, and the thumb is measured
+   in layout coordinates that survive a scroll offset. */
+.exp-modes .segmented {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.exp-modes .segmented::-webkit-scrollbar { display: none; }
+.exp-modes .segmented button { gap: 6px; }
+.exp-modes .segmented button svg { opacity: 0.9; }
+
+.exp-mode-hint {
+  flex: 1 1 320px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.exp-fields {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.exp-field {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.exp-glob {
+  margin: -4px 0 0;
+  max-width: 96ch;
+}
+.exp-glob code {
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- destination groups ---------- */
+
+.exp-groups {
+  display: flex;
+  flex-direction: column;
+}
+.exp-group + .exp-group { border-top: 1px solid var(--border); }
+
+.exp-group-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px 4px 6px;
+}
+
+.exp-group-toggle {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  font-weight: 550;
+}
+.exp-group-toggle:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: transparent;
+}
+
+.exp-chev {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-faint);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.exp-chev[data-open='true'] { transform: rotate(90deg); }
+
+.exp-group-label {
+  flex: none;
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+.exp-group-body { padding: 0 0 6px; }
+
+.exp-group-more,
+.exp-groups-more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 16px 12px;
+}
+.exp-groups-more {
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+}
+
+/* ---------- chain ---------- */
+
+.exp-chain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 4px;
+  min-width: 0;
+}
+
+/* The pill is an .asset-chip that happens to be a link; without these it would
+   inherit the global anchor colour and underline on hover. */
+.exp-pill {
+  max-width: 250px;
+  padding: 2px 8px;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.exp-pill:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+.exp-pill svg {
+  flex: none;
+  color: var(--text-faint);
+}
+.exp-pill .dot { flex: none; }
+.exp-pill strong {
+  min-width: 0;
+  font-weight: 600;
+}
+
+/* Connector. --link is the edge-kind colour, set inline by the component; the
+   fallback keeps an unknown kind legible rather than invisible. */
+.exp-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  color: var(--link, var(--text-faint));
+  white-space: nowrap;
+}
+.exp-link-line {
+  width: 12px;
+  height: 0;
+  border-top: 1.5px solid currentColor;
+  opacity: 0.85;
+}
+/* A denial is not a route, so its connector is not drawn as a solid one. */
+.exp-link[data-deny='true'] .exp-link-line { border-top-style: dashed; }
+.exp-link-head {
+  font-size: var(--fs-xs);
+  line-height: 1;
+}
+.exp-link-label {
+  padding: 1px 7px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: var(--fs-micro);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.exp-more {
+  padding: 1px 9px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+.exp-more:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.exp-chip-deny {
+  color: var(--danger);
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+}
+.exp-chip-warn {
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+/* ---------- zero-result caveat ---------- */
+
+/* Weighted like a finding, not like a footnote: an operator who reads "0
+   paths" as "safe" has been misled, so this panel gets a rail, a heading and
+   room to breathe. */
+.exp-caveat { margin-bottom: 16px; }
+.exp-caveat .card-body { padding-left: 19px; }
+
+.exp-caveat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--warn);
+}
+.exp-caveat-head h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  color: var(--text);
+}
+.exp-caveat-head svg { flex: none; }
+
+.exp-caveat p {
+  margin: 0 0 12px;
+  max-width: 86ch;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.exp-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 0;
+  max-width: 92ch;
+  list-style: none;
+}
+.exp-reasons li {
+  position: relative;
+  padding-left: 19px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+.exp-reasons li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warn);
+  opacity: 0.7;
+}
+.exp-reasons strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.exp-reasons code,
+.exp-caveat p code {
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+
+.exp-caveat-foot {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+
+@media (max-width: 720px) {
+  .exp-pill { max-width: 100%; }
+  .exp-mode-hint { flex-basis: 100%; }
+  .exp-group-label { display: none; }
+  .exp-caveat p,
+  .exp-reasons { max-width: none; }
+}

@@ -118,3 +118,35 @@ func TestRenderer_HTML_EmptyTopology(t *testing.T) {
 		t.Errorf("output missing header count %q", want)
 	}
 }
+
+// The empty-state overlay is positioned `inset: 0` over the whole canvas and
+// hidden with the `hidden` attribute. Because the class also sets `display`,
+// the UA's `[hidden] { display: none }` loses on specificity — so without an
+// explicit `[hidden]` rule the "no nodes" text is painted across every graph,
+// however many nodes it has. That shipped, and only a screenshot caught it.
+func TestRenderer_HTML_EmptyOverlayCanActuallyHide(t *testing.T) {
+	r, _ := topology.New("html")
+	var buf bytes.Buffer
+	if err := r.Render(&topology.Topology{}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), ".topo-empty[hidden]") {
+		t.Error("the empty-state overlay sets `display` on its class, so it needs an explicit [hidden] rule or it never hides")
+	}
+}
+
+// A provider missing from the palette does not fail loudly — its nodes render
+// grey and the legend calls them "other", which reads as "unclassified"
+// rather than "the renderer has not heard of tailscale".
+func TestRenderer_HTML_PaletteCoversEveryProvider(t *testing.T) {
+	r, _ := topology.New("html")
+	var buf bytes.Buffer
+	if err := r.Render(&topology.Topology{}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"cloudflare", "oci", "kubernetes", "gcp", "netbird", "tailscale"} {
+		if !strings.Contains(buf.String(), p+":") {
+			t.Errorf("provider %q has no colour in PROVIDER_COLORS — its nodes render in the grey fallback", p)
+		}
+	}
+}

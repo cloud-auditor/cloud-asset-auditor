@@ -42,6 +42,7 @@ providers to run via the API but cannot supply new credentials.`,
 				APIToken:       os.Getenv("AUDITOR_API_TOKEN"),
 				MaxConcurrency: v.GetInt("max-concurrency"),
 				IncludeRaw:     v.GetBool("include-raw"),
+				Providers:      serveProviders(v.GetStringSlice("provider")),
 			}
 
 			srv, err := server.New(cfg)
@@ -59,7 +60,28 @@ providers to run via the API but cannot supply new credentials.`,
 	}
 	cmd.Flags().String("addr", ":8080", "address to listen on")
 	cmd.Flags().String("auth", "none", "auth mode: none|basic|token")
+	cmd.Flags().StringSlice("provider", nil,
+		"scope requests that name no providers to this set (default: all registered; --demo implies demo)")
 	cmd.Flags().Int("max-concurrency", 5, "per-provider parallelism (mirrors `audit --max-concurrency`)")
 	cmd.Flags().Bool("include-raw", false, "include full provider payload in Asset.Raw for both SSE and export")
 	return cmd
+}
+
+// serveProviders decides the default provider scope for API requests that
+// don't name one.
+//
+// The demo case is the reason this exists. `serve --demo` on a laptop that
+// also has live Cloudflare or kube credentials would otherwise blend
+// fabricated assets into a real inventory the moment the browser omitted the
+// parameter — and nothing downstream of that point marks which assets were
+// invented. An explicit --provider still wins, so `serve --demo --provider
+// demo,kubernetes` remains a way to show the demo next to a real cluster.
+func serveProviders(flag []string) []string {
+	if len(flag) > 0 {
+		return flag
+	}
+	if demoMode.Load() {
+		return []string{demoProviderName}
+	}
+	return nil
 }

@@ -1,0 +1,330 @@
+/*
+ * Dashboard-only styles.
+ *
+ * Everything reusable — .card, .stat, .bars, .meter, .pill, .skeleton, .tick —
+ * already lives in globals.css and is used as-is. What is here is either page
+ * layout, or the collection-health rows and the Donut, which this page is the
+ * only consumer of.
+ *
+ * StatTile and BarList are *not* in that set any more: StatTile also renders on
+ * Exposure, and BarList's clickable variant is `button.bar-row` in globals.css.
+ * Both are fully served from there, so mounting either on a third surface needs
+ * no stylesheet import. If Donut ever ships elsewhere, .donut-* has to make the
+ * same trip up rather than being imported from here.
+ */
+
+/* ---------- page ---------- */
+
+.dash {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* The column gap owns the rhythm now, so the stock bottom margins would show
+   up as an uneven double space. */
+.dash > .page-head,
+.dash > .banner {
+  margin-bottom: 0;
+}
+/* AuditControls sets marginBottom inline, which no class can override — cancel
+   it on the wrapper instead of editing a component four pages share. */
+.dash-controls {
+  margin-bottom: -16px;
+}
+
+.dash-band {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.dash-ranks {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+@media (max-width: 900px) {
+  .dash-band {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.dash-chev {
+  display: inline-flex;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+/* ---------- cross-filter ---------- */
+
+.dash-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- donut ---------- */
+
+.donut-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.donut {
+  position: relative;
+  flex: none;
+}
+.donut svg {
+  display: block;
+}
+
+/* The draw-in and every later update are the same transition: a slice growing
+   from its own start angle. Reduced motion collapses the duration globally, so
+   the ring simply appears. */
+.donut-seg {
+  transition:
+    stroke-dasharray var(--dur-slow) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+.donut-seg[data-pick='true'] {
+  cursor: pointer;
+}
+.donut-seg[data-dim='true'] {
+  opacity: 0.28;
+}
+
+/* HTML over the SVG rather than <text>: it inherits the type tokens, truncates,
+   and the ring underneath keeps the hover because this layer is inert. */
+.donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 20%;
+  text-align: center;
+  pointer-events: none;
+}
+.donut-c-v {
+  font-size: var(--fs-xl);
+  font-weight: 640;
+  line-height: 1.05;
+}
+.donut-c-k {
+  max-width: 100%;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+.donut-c-s {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.donut-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.donut-legend-row {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-align: left;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+button.donut-legend-row {
+  cursor: pointer;
+}
+button.donut-legend-row:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.donut-legend-row[data-on='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--text);
+}
+.donut-legend-row[data-dim='true'] {
+  opacity: 0.45;
+}
+.donut-swatch {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 3px;
+}
+.donut-n {
+  color: var(--text);
+}
+.donut-p {
+  min-width: 38px;
+  text-align: right;
+}
+/* The "Other" note drops to a second line under the label rather than
+   squeezing the numerals. */
+.donut-other {
+  grid-column: 2 / -1;
+}
+
+/* ---------- collection health ---------- */
+
+/* Six columns need ~430px. Rather than dropping columns on a phone — every one
+   of them is the point of the panel — the block scrolls sideways inside the
+   card, which is only ever reachable below ~500px. */
+.health {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-x: auto;
+}
+.health-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 1.3fr) 58px minmax(44px, 1fr) 62px 38px 92px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 430px;
+  padding: 6px 10px 6px 13px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+.health-row .ar {
+  text-align: right;
+}
+.health-head {
+  padding-top: 0;
+  padding-bottom: 4px;
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+/* Resets the base button chrome; .health-row owns the geometry. */
+.health-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.health-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.health-btn[data-on='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+.health-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+  font-weight: 600;
+}
+.health-err {
+  color: var(--danger);
+}
+
+/* ---------- errors ---------- */
+
+.dash-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 460px;
+  overflow: auto;
+}
+.dash-err-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.dash-err-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+}
+.dash-err-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dash-err-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  border-left: 2px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  word-break: break-word;
+  /* The whole point of the panel is getting these lines out to an issue. */
+  user-select: text;
+}
+.dash-err-list .pill {
+  flex: none;
+}
+
+/* ---------- skeletons ---------- */
+
+.dash-skel-block {
+  display: flex;
+  justify-content: center;
+}
+.dash-skel-ring {
+  display: block;
+  width: 148px;
+  height: 148px;
+  border-radius: 50%;
+}
+.dash-skel-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dash-skel-row {
+  display: block;
+  height: 26px;
+}

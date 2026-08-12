@@ -1,0 +1,470 @@
+/*
+ * Topology-page styles.
+ *
+ * Imported from app/topology/page.tsx, which in the App Router makes it a
+ * global stylesheet loaded on this route only. Everything is therefore
+ * namespaced under `.topo-*` (and `.topo-graph` for the descendant rules that
+ * restyle globals.css's shared `.graph-wrap` / `.legend` / `.inspector`) so it
+ * cannot reach another page's markup. GraphCanvas and Minimap live in
+ * components/ but are only ever mounted here, so their classes live here too.
+ *
+ * No colour is written literally — every value is a token from globals.css.
+ */
+
+/* ---------- knob bar ---------- */
+
+.topo-knobs {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+}
+.topo-knob {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.topo-knob > .label {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 650;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* The download rail moved to globals.css as `.exports` — the Exposure page had
+   grown a second, differently-shaped version of the same offer. */
+
+.topo-counts {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+.topo-counts b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: var(--text);
+}
+
+/* ---------- canvas ---------- */
+
+.topo-graph {
+  /* Taller than the shared default: this page's whole job is the picture, and
+     the knob bar above it is one row. */
+  --graph-h: calc(100vh - 300px);
+  min-height: 520px;
+}
+
+/* Text painted over a busy graph needs its own backdrop; a stroke laid *under*
+   the fill (paint-order) is one element instead of a rect per label.
+
+   `stroke-width` is deliberately NOT set here: it would be a graph-unit width
+   inside the viewBox, so it would thicken with the zoom until it swallowed the
+   glyphs it is meant to separate. GraphCanvas sets it per element, divided by
+   the current scale — and a CSS declaration would beat that attribute. */
+.topo-graph .graph-node text {
+  fill: var(--text);
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-linejoin: round;
+  letter-spacing: -0.01em;
+}
+
+.topo-graph .graph-node .halo {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+  pointer-events: none;
+}
+.topo-graph .graph-node:hover .halo { opacity: 0.18; }
+.topo-graph .graph-node[data-selected='true'] .halo { opacity: 0.14; }
+
+.topo-graph .graph-node .ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+
+.topo-graph .graph-node .body {
+  transition: stroke-width var(--dur-fast) var(--ease);
+}
+.topo-graph .graph-node:hover .body { stroke-width: 2.6; }
+
+.topo-graph .topo-edges path {
+  fill: none;
+  stroke-opacity: 0.62;
+  stroke-linecap: round;
+}
+.topo-graph .graph-edge:hover path { stroke-opacity: 0.95; }
+
+/* One travelling dot per period, laid over the real stroke. Keeping the flow
+   signal off the base stroke is what lets "dashed" keep meaning "heuristic"
+   for every edge kind, including this one. Period 20 divides the -20 offset
+   in dash-march, so the loop is seamless. */
+.topo-graph .topo-edges path.flow {
+  stroke-dasharray: 2 18;
+  stroke-linecap: round;
+  stroke-opacity: 0.95;
+  animation: dash-march 1.6s linear infinite;
+}
+
+/* Same story as the node labels: stroke width and dash length are set per
+   element in graph units so they come out constant on screen. */
+.topo-graph .topo-hulls path {
+  stroke-opacity: 0.5;
+}
+
+/* Group labels are drawn over everything else, so they get a backing pill
+   rather than a stroke halo — a halo only wins against a quiet background, and
+   this text lands on hull fills, edges and node glyphs at once. */
+.topo-graph .topo-hull-labels {
+  pointer-events: none;
+  user-select: none;
+}
+.topo-graph .topo-hull-labels rect {
+  fill: var(--surface);
+  fill-opacity: 0.88;
+  stroke-opacity: 0.55;
+}
+.topo-graph .topo-hull-labels text {
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+/* ---------- floating toolbar ---------- */
+
+.topo-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: var(--radius);
+}
+.topo-zoom {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+}
+.topo-settling {
+  margin-left: 2px;
+  padding-right: 10px;
+}
+
+.topo-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 9px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-faint);
+}
+.topo-search:focus-within {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.topo-search input {
+  width: 150px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.topo-search input:focus-visible { outline: none; }
+
+.topo-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 3;
+  width: max(240px, 100%);
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 5px;
+  list-style: none;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-3);
+  animation: fade-up var(--dur-fast) var(--ease) both;
+}
+.topo-results li {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.topo-results li[data-active='true'] { background: var(--surface-2); }
+.topo-results li[data-current='true'] { color: var(--accent); }
+
+/* ---------- legend, doubling as the edge-kind filter ---------- */
+
+.topo-legend {
+  z-index: 2;
+  max-width: min(330px, 46%);
+  gap: 5px;
+  padding: 9px 11px 8px;
+  /* Bounded so the panel can never climb the left rail into the minimap above
+     it (toolbar → minimap → gap → legend). Nine edge kinds on a short viewport
+     is exactly the case where this used to cover the graph it explains: now
+     the chips scroll, and the disclosure hands the space back outright. */
+  max-height: calc(100% - 200px);
+}
+.topo-legend[data-open='false'] { padding-bottom: 9px; }
+
+.topo-legend-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+/* Resets the global bare-`button` chrome: the disclosure is the panel's title,
+   not a button sitting next to one. */
+.topo-legend-toggle {
+  flex: 1;
+  min-width: 0;
+  gap: 5px;
+  justify-content: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.topo-legend-toggle:hover:not(:disabled) { background: none; }
+.topo-legend-toggle:hover .topo-legend-title { color: var(--text-dim); }
+.topo-legend-chevron {
+  display: inline-flex;
+  color: var(--text-faint);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.topo-legend[data-open='true'] .topo-legend-chevron { transform: rotate(90deg); }
+
+.topo-legend-title {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+/* The chips are the legend, so they lay out as a wrapping row rather than
+   inheriting .legend's single column. `min-height: 0` is what lets this box
+   shrink inside the flex column above and scroll rather than overflow it. */
+.topo-legend-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+  overflow: hidden auto;
+}
+.topo-legend .chip {
+  align-self: flex-start;
+  max-width: 100%;
+}
+.topo-legend .chip:not(.on) { opacity: 0.55; }
+.topo-legend .chip:not(.on):hover { opacity: 1; }
+.topo-legend-hint {
+  margin: 4px 0 0;
+  max-width: 30ch;
+}
+
+/* ---------- minimap ---------- */
+
+/* Top-left, docked under the toolbar: 12px inset + the toolbar's 38px + an 8px
+   gap. Every other corner is already spoken for — the inspector owns top-right,
+   the legend bottom-left, and bottom-right belongs to globals.css's
+   `.toast-stack`, which is fixed to the *viewport*, so no offset inside this
+   card can reliably dodge it (that is what buried the map in the screenshot).
+   Under the zoom controls is also where the overview belongs: next to the
+   controls that move it.
+
+   Opaque, not `--glass`: this sits directly on the canvas and its whole job is
+   to be legible at a glance, which a 72%-alpha panel over a dotted background
+   was not. */
+.topo-minimap {
+  position: absolute;
+  left: 12px;
+  top: 58px;
+  z-index: 2;
+  display: block;
+  padding: 5px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-2);
+  cursor: crosshair;
+  /* The button owns the pointer for its whole drag; without this a touch drag
+     scrolls the page out from under it. */
+  touch-action: none;
+}
+.topo-minimap:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  background: var(--surface-2);
+}
+.topo-minimap svg { display: block; border-radius: var(--radius-xs); }
+/* Dimming everything outside the viewport, rather than tinting the inside,
+   is what keeps the frame readable when it is larger than the graph — at
+   fit-to-view its outline is off the map entirely. */
+.topo-minimap .scrim {
+  fill: var(--scrim);
+  pointer-events: none;
+}
+.topo-minimap .vp {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+/* ---------- inspector ---------- */
+
+.topo-inspector {
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 330px;
+}
+.topo-inspector > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.topo-inspector > header h3 { flex: 1; min-width: 0; }
+.topo-inspector-glyph {
+  display: inline-flex;
+  padding-top: 1px;
+  flex: none;
+}
+.topo-inspector-id {
+  word-break: break-all;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+.topo-inspector dl { margin-top: 2px; }
+
+.topo-neighbours h4 {
+  margin: 8px 0 5px;
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+.topo-neighbour-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.topo-neighbour-kind {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  font-size: var(--fs-micro);
+  font-weight: 650;
+}
+button.topo-neighbour {
+  padding: 2px 8px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  cursor: pointer;
+  max-width: 100%;
+}
+button.topo-neighbour:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+
+/* ---------- empty / guard states ---------- */
+
+.topo-guard .empty { padding: 48px 24px; }
+.topo-guard .empty .n {
+  font-size: var(--fs-2xl);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1080px) {
+  .topo-inspector { width: 285px; }
+  /* Narrower means taller — the chips wrap onto more rows — so the ceiling
+     that keeps the legend below the minimap has to come down with it. */
+  .topo-legend {
+    max-width: 240px;
+    max-height: calc(100% - 190px);
+  }
+}
+
+@media (max-width: 720px) {
+  .topo-graph { --graph-h: 68vh; }
+  .topo-toolbar { right: 12px; }
+  .topo-search input { width: 100%; }
+
+  /* The minimap is the one panel that is purely a convenience — pan and zoom
+     do everything it does — so it is what gives up its space first. */
+  .topo-minimap { display: none; }
+
+  /* The legend is not optional: it is also the edge-kind filter. It becomes a
+     scrolling strip along the bottom rather than disappearing — and with the
+     minimap gone there is nothing above it to stay clear of, so the height
+     ceiling comes off. The disclosure still works; it just folds the strip
+     down to its title. */
+  .topo-legend {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    max-width: none;
+    max-height: none;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: nowrap;
+  }
+  .topo-legend-head { margin-bottom: 0; flex: none; }
+  .topo-legend-body {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow: auto hidden;
+  }
+  .topo-legend-hint { display: none; }
+  .topo-legend .chip { align-self: center; flex: none; }
+
+  /* globals.css un-floats .inspector at this width, but .graph-wrap clips its
+     overflow at a fixed height, so a static one would simply vanish. It stays
+     absolute and becomes a bottom sheet over the canvas instead. */
+  .topo-graph .topo-inspector {
+    position: absolute;
+    top: auto;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    width: auto;
+    max-height: 60%;
+    margin-top: 0;
+  }
+}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -29,13 +30,20 @@ var defaultExcludedNamespaces = []string{"kube-system", "kube-public", "kube-nod
 // Config drives provider construction. Everything is optional; sensible
 // defaults are applied in New.
 type Config struct {
-	KubeContext           string
+	KubeContext  string
+	KubeContexts []string // multi-cluster scan; "all" = every kubeconfig context. Wins over KubeContext.
+
 	KubeNamespace         string   // empty means all namespaces (minus excluded)
 	KubeExcludeNamespaces []string // ignored when KubeNamespace is set
 	ExcludeHelmSecrets    bool     // skip Helm v3 release-state Secrets
+	ExcludeEvents         bool     // skip Event objects (core v1 + events.k8s.io) at discovery
 	MaxConcurrency        int
 	IncludeRaw            bool
 }
+
+// allContextsSentinel passed via --kube-contexts (or the API) expands to
+// every context in the resolved kubeconfig.
+const allContextsSentinel = "all"
 
 // Provider implements core.Provider for Kubernetes. Like the OCI provider,
 // auth and clients resolve lazily so factory construction is cheap.
@@ -91,6 +99,15 @@ func (p *Provider) SetKubeContext(s string) {
 	}
 }
 
+// SetKubeContexts sets the multi-cluster context list. A nil/empty slice is
+// ignored so "user didn't pass --kube-contexts" can't blank out a value set
+// via the singular SetKubeContext.
+func (p *Provider) SetKubeContexts(names []string) {
+	if len(names) > 0 {
+		p.cfg.KubeContexts = names
+	}
+}
+
 func (p *Provider) SetKubeNamespace(s string) { p.cfg.KubeNamespace = s }
 
 func (p *Provider) SetKubeExcludeNamespaces(ns []string) {
@@ -103,6 +120,8 @@ func (p *Provider) SetKubeExcludeNamespaces(ns []string) {
 }
 
 func (p *Provider) SetKubeExcludeHelmSecrets(b bool) { p.cfg.ExcludeHelmSecrets = b }
+
+func (p *Provider) SetKubeExcludeEvents(b bool) { p.cfg.ExcludeEvents = b }
 
 // ensureClients resolves the REST config, builds the discovery + dynamic
 // clients, and records a cluster identifier — all exactly once.
@@ -166,6 +185,34 @@ func sendAsset(ctx context.Context, out chan<- core.Asset, a core.Asset) bool {
 	}
 }
 
+// assetID returns a stable identity for an object.
+//
+// The UID is right when there is one, but not every listable resource has one:
+// objects the API server *computes* rather than stores carry an empty UID.
+// Against a real cluster that is metrics.k8s.io PodMetrics and NodeMetrics
+// plus ComponentStatus — 65 of 1,568 assets on the cluster this was found on,
+// every one of them landing on the same empty ID.
+//
+// That is not cosmetic. Asset identity is (provider, id): `auditor diff` keys
+// drift on it, the topology index buckets byID, and the audit cache stores by
+// it — so every UID-less object in a cluster collapses into a single slot and
+// the last one silently wins.
+//
+// The fallback is the object's own coordinates, which is exactly what makes it
+// unique within a cluster and stable across runs: apiVersion, kind, namespace,
+// name. It is prefixed so a synthesized id can never be mistaken for, or
+// collide with, a real UID.
+func (p *Provider) assetID(u *unstructured.Unstructured) string {
+	if uid := string(u.GetUID()); uid != "" {
+		return uid
+	}
+	parts := []string{"k8s", u.GetAPIVersion(), u.GetKind()}
+	if ns := u.GetNamespace(); ns != "" {
+		parts = append(parts, ns)
+	}
+	return strings.Join(append(parts, u.GetName()), "/")
+}
+
 // unstructuredToAsset is the universal mapper — works for every Kubernetes
 // resource (built-in or CRD) because every object has the same metadata
 // shape under the hood.
@@ -174,7 +221,7 @@ func (p *Provider) unstructuredToAsset(u *unstructured.Unstructured) core.Asset 
 		Provider:  providerName,
 		AccountID: p.clusterID,
 		Type:      formatType(u.GetAPIVersion(), u.GetKind()),
-		ID:        string(u.GetUID()),
+		ID:        p.assetID(u),
 		Name:      u.GetName(),
 		Status:    extractStatus(u),
 		Tags:      collapseTags(u.GetLabels(), u.GetNamespace()),

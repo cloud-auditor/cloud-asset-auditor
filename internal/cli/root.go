@@ -16,6 +16,8 @@ import (
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/config"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/logging"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/providers/demo"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/store"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/telemetry"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/version"
 )
@@ -82,6 +84,27 @@ func newRootCmd() *cobra.Command {
 			}); err != nil {
 				return err
 			}
+
+			// Load any vaulted provider credentials into the environment so
+			// the provider factories (which read os.Getenv) pick them up. Best
+			// effort: a passphrase problem must not block commands that don't
+			// need the vault, so it only warns.
+			if err := v.BindPFlag("db", cmd.Root().PersistentFlags().Lookup("db")); err != nil {
+				return fmt.Errorf("bind db: %w", err)
+			}
+			loadVaultedSecrets(cmd.Context(), v.GetString("db"))
+
+			// --demo installs the built-in synthetic provider. It is
+			// registered here rather than from an init() so "demo" never
+			// appears in core.Registered() on a normal run — fabricated
+			// assets must not be one mistyped flag away from a real audit.
+			if err := v.BindPFlag("demo", cmd.Root().PersistentFlags().Lookup("demo")); err != nil {
+				return fmt.Errorf("bind demo: %w", err)
+			}
+			if v.GetBool("demo") {
+				demo.Register()
+				setDemoMode(true)
+			}
 			return nil
 		},
 	}
@@ -89,14 +112,63 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().String("log-level", "info", "log level: debug|info|warn|error")
 	cmd.PersistentFlags().String("log-format", "text", "log format: text|json")
 	cmd.PersistentFlags().String("tracing", "off", "tracing mode: off|stdout|otlp (honors OTEL_EXPORTER_OTLP_* env vars)")
+	cmd.PersistentFlags().String("db", store.DefaultPath(),
+		"SQLite database for the audit cache + secrets vault (env AUDITOR_DB)")
+	cmd.PersistentFlags().Bool("demo", false,
+		"run against a built-in synthetic multi-cloud inventory instead of real providers — needs no credentials (env AUDITOR_DEMO)")
 
 	cmd.AddCommand(newAuditCmd(state))
 	cmd.AddCommand(newServeCmd(state))
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newProvidersCmd(state))
 	cmd.AddCommand(newTopologyCmd(state))
+	cmd.AddCommand(newReachCmd(state))
 	cmd.AddCommand(newDiffCmd())
+	cmd.AddCommand(newSecretsCmd(state))
+	cmd.AddCommand(newCacheCmd(state))
+	cmd.AddCommand(newCheckCmd(state))
 	return cmd
+}
+
+// loadVaultedSecrets decrypts stored secrets into the environment if the DB
+// already exists and holds any. It never creates the DB (so `auditor version`
+// stays side-effect free) and never fails the command — a missing or wrong
+// passphrase only warns, because plenty of commands don't need the vault.
+func loadVaultedSecrets(ctx context.Context, dbPath string) {
+	if dbPath == "" {
+		return
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		return // no DB yet — nothing to load, and we won't create it here
+	}
+	st, err := store.Open(dbPath)
+	if err != nil {
+		slog.Warn("secrets vault: open failed", "error", err)
+		return
+	}
+	defer func() { _ = st.Close() }()
+
+	switch has, err := st.HasSecrets(ctx); {
+	case err != nil:
+		slog.Warn("secrets vault: lookup failed", "error", err)
+		return
+	case !has:
+		return
+	}
+
+	pass := os.Getenv("AUDITOR_SECRETS_PASSPHRASE")
+	if pass == "" {
+		slog.Warn("secrets vault holds credentials but AUDITOR_SECRETS_PASSPHRASE is unset; not loading them")
+		return
+	}
+	loaded, err := st.LoadSecretsIntoEnv(ctx, pass)
+	if err != nil {
+		slog.Warn("secrets vault: could not load credentials", "error", err)
+		return
+	}
+	if len(loaded) > 0 {
+		slog.Debug("loaded credentials from secrets vault", "count", len(loaded))
+	}
 }
 
 // Execute runs the CLI and returns a process exit code.

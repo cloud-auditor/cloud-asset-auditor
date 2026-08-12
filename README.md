@@ -1,10 +1,11 @@
 # cloud-asset-auditor
 
 Single-binary CLI + web UI that inventories cloud assets across OCI,
-Cloudflare, and Kubernetes into one canonical schema — JSON, CSV, Excel
-(XLSX), or a self-contained HTML report — with an inferred network
-topology graph, an interactive in-browser diagram, live dashboards,
-and snapshot drift detection (`auditor diff`).
+Cloudflare, Kubernetes, GCP, NetBird, and Tailscale into one canonical schema —
+JSON, CSV, Excel (XLSX), or a self-contained HTML report — with inferred
+network **and traffic-flow** topology graphs at high or low level, an
+interactive in-browser diagram, live dashboards, and snapshot drift detection
+(`auditor diff`).
 
 > **All phases shipped.** Foundation, JSON / CSV / XLSX renderers, CLI, three
 > providers (Cloudflare zones+DNS / OCI all resource types /
@@ -62,6 +63,7 @@ export CLOUDFLARE_API_TOKEN=cf-token-with-read-scopes
 #   → ~/.oci/config → OCI_* env vars
 ./bin/auditor audit --provider oci -o json                       # every subscribed region (default)
 ./bin/auditor audit --provider oci --oci-regions me-jeddah-1 -o csv  # narrow to one region
+./bin/auditor audit --provider oci --oci-compartments Production -o csv  # one compartment + its children (by name or OCID)
 ./bin/auditor audit --provider oci --oci-profile PROD            # named profile
 # Excel workbook, one worksheet per region/compartment (tab = "region (compartment)"):
 ./bin/auditor audit --provider oci \
@@ -74,13 +76,52 @@ export CLOUDFLARE_API_TOKEN=cf-token-with-read-scopes
 #   ~/.kube/config; --kube-context overrides current-context.
 ./bin/auditor audit --provider kubernetes -o json
 ./bin/auditor audit --provider kubernetes --kube-context kind-dev -o csv
+# Inventory several clusters in one run (or "all" for every kubeconfig context);
+# each asset keeps its origin cluster in account_id.
+./bin/auditor audit --provider kubernetes --kube-contexts prod-us,prod-eu -o csv
 ./bin/auditor audit --provider kubernetes --kube-namespace prod
 ./bin/auditor audit --provider kubernetes --kube-exclude-namespaces kube-system,kube-public,kube-node-lease
+# Drop high-volume, ephemeral Event objects (skipped at discovery, never listed):
+./bin/auditor audit --provider kubernetes --kube-exclude-events -o csv
 # Excel: a sheet per namespace, a Summary sheet up front, Helm release Secrets dropped:
 ./bin/auditor audit --provider kubernetes --kube-exclude-helm-secrets \
   -o xlsx --sheet-by tag:namespace --summary --output-file k8s-assets.xlsx
 
+# GCP: every resource type across a project / folder / org via the Cloud Asset
+# Inventory API (one call — no per-service wiring). Auth is ADC (service-account
+# key, gcloud user creds, or workload identity); needs roles/cloudasset.viewer.
+export GOOGLE_CLOUD_PROJECT=my-project
+./bin/auditor audit --provider gcp -o json
+./bin/auditor audit --provider gcp --gcp-scope organizations/123456 -o csv  # whole org
+
+# NetBird (WireGuard mesh / zero-trust networking): peers, groups, policies,
+# routes, networks, DNS nameserver groups, setup keys, users, posture checks,
+# account — via the REST Management API.
+#   Auth: a Personal Access Token (nbp_…) in NETBIRD_API_TOKEN.
+export NETBIRD_API_TOKEN=nbp_your_personal_access_token
+./bin/auditor audit --provider netbird -o json
+# Point at a self-hosted Management API instead of NetBird cloud:
+./bin/auditor audit --provider netbird \
+  --netbird-management-url https://netbird.example.com -o csv
+
+# Tailscale (WireGuard mesh / zero-trust): devices, users, auth keys, DNS, and
+# the tailnet policy file (ACL rules become traffic-flow edges in `topology`).
+export TAILSCALE_API_KEY=tskey-api-xxxxxxxxxxxx
+./bin/auditor audit --provider tailscale -o json
+# A token that can reach several tailnets, or a self-hosted control plane:
+./bin/auditor audit --provider tailscale \
+  --tailscale-tailnet example.com --tailscale-api-url https://headscale.internal
+
 ./bin/auditor audit --include-raw -o json                        # any provider, with full SDK payloads
+
+# Local SQLite (--db, default ~/.config/auditor/auditor.db) backs two things:
+#  1) An audit cache so you don't re-pull every run:
+./bin/auditor audit --provider netbird --cache -o json           # write the snapshot
+./bin/auditor audit --provider netbird --cache-max-age 1h -o json # reuse it if <1h old (skips the API)
+#  2) An encrypted secrets vault (AES-256-GCM) so creds load automatically:
+export AUDITOR_SECRETS_PASSPHRASE='choose-a-passphrase'
+./bin/auditor secrets set NETBIRD_API_TOKEN nbp_xxx              # stored encrypted at rest
+./bin/auditor audit --provider netbird                          # token loaded from the vault, no export needed
 
 # No-provider path (useful for smoke tests):
 ./bin/auditor audit --provider none -o json     # → []
@@ -100,43 +141,67 @@ vars / config files as the CLI); the browser never receives them. The
 frontend can pick which registered providers to run but cannot supply
 new credentials.
 
-The SPA has three tabs (all hand-rolled vanilla JS — no third-party
-code, no build step):
+The frontend is a Next.js app (TypeScript, App Router) built as a
+**static export** and embedded with `go:embed` — so the binary stays
+self-contained: no Node runtime, no CDN, no sidecar. Source lives in
+[`web/`](./web); run `just web` after changing it and commit the regenerated
+`internal/server/webui/`.
 
-- **Assets** — provider checkboxes, live SSE-streamed table with
-  filter / sort / type+provider facets, exports (CSV / JSON / XLSX /
-  HTML report).
-- **Topology** — interactive force-directed network diagram: pan /
-  zoom / drag, details panel with in/out edges, provider + edge-kind
-  legend, hostname filter, exports (JSON / DOT / Mermaid /
-  Excalidraw). Two build paths: a fresh raw-bearing audit, or an
-  instant graph from the assets already streamed on the Assets tab.
-  Open `/#demo` for a synthetic preview that needs no credentials.
-- **Dashboard** — live charts that update while the audit streams:
-  provider donut, top-15 type / region / account bars, stat pills;
-  segments click through to the filtered Assets view.
+Four pages:
+
+- **Dashboard** — inventory shape while the audit streams: stat tiles
+  with a live arrival sparkline, a provider composition ring, ranked
+  type / region bars, and a per-provider collection-health panel
+  (count, duration, errors).
+- **Assets** — the full inventory in a windowed table that stays smooth
+  at 50k rows: search, provider / type / region / status facets,
+  sortable columns, density and column controls, and a detail drawer
+  with every tag and the raw provider payload. Exports to CSV / JSON /
+  XLSX / HTML.
+- **Topology** — interactive force-directed diagram: curved edges
+  coloured by kind, per-type glyphs, group hulls, animated traffic-flow
+  edges, minimap, node search, and an inspector that lists a node's
+  neighbours. Two build paths: a fresh raw-bearing audit, or an instant
+  graph from the assets already streamed. Exports to DOT / Mermaid /
+  D2 / GraphML / Excalidraw / draw.io / HTML.
+- **Exposure** — reachability, rendered as attack-path chains grouped by
+  destination: internet exposure, what can reach an asset, what an asset
+  can reach, or every route between two.
+
+Everything is keyboard-reachable, and **⌘K** opens a command palette that
+can navigate, start or stop a run, toggle providers, switch theme, jump to
+an asset, or grab any export. Light and dark themes both ship; the choice
+persists and defaults to the system setting.
 
 ```bash
 ./bin/auditor serve                                   # → http://localhost:8080, auth=none
+./bin/auditor serve --demo                            # no credentials needed — synthetic inventory
 ./bin/auditor serve --addr 127.0.0.1:9090 --auth basic
 #   With AUDITOR_BASIC_USER / AUDITOR_BASIC_PASS env vars
 ./bin/auditor serve --auth token
 #   With AUDITOR_API_TOKEN env; client sends `Authorization: Bearer <token>`
 ```
 
+`--demo` is the fastest way to see what the tool does: it serves a complete
+fictional multi-cloud inventory (~590 assets, every edge kind represented)
+with nothing to configure. See [docs/providers.md](./docs/providers.md#demo-data).
+
 Endpoints:
 
 | Path                                  | Purpose                                                                                          |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `GET /`                               | Embedded SPA (Assets / Topology / Dashboard tabs)                                                |
+| `GET /`                               | Embedded SPA (Dashboard / Assets / Topology / Exposure). `?run=1` starts an audit on load; `&providers=` / `&kube_contexts=` scope it |
 | `GET /healthz`                        | Liveness — always 200, always open (load-balancer probes don't need auth)                        |
 | `GET /metrics`                        | Prometheus metrics — always open (scraper semantics)                                             |
 | `GET /api/v1/openapi.yaml`            | OpenAPI 3.1 spec for everything under `/api/v1` — auth-exempt                                    |
 | `GET /api/v1/providers`               | `{providers: [...], auth_mode: "..."}`                                                           |
-| `GET /api/v1/audit?providers=a,b`     | SSE stream: `meta` → `asset`* → `done`. Optional `init_error` / `error` events interleaved       |
+| `GET /api/v1/kube/contexts`           | `{contexts: [...], current: "..."}` from the server's kubeconfig (empty when none / in-cluster)  |
+| `GET /api/v1/audit?providers=a,b`     | SSE stream: `meta` → `asset`* → `done`. Optional `init_error` / `error` events interleaved. `&kube_contexts=ctx-a,ctx-b` (or `all`) scopes the K8s scan |
 | `GET /api/v1/audit/export?format=csv` | Synchronous download — `json` / `ndjson` / `csv` / `html` (report) / `xlsx`                      |
-| `GET /api/v1/topology`                | Runs an audit, returns the inferred graph (`?format=json\|dot\|mermaid\|excalidraw`)             |
+| `GET /api/v1/topology`                | Runs an audit, returns the inferred graph (`?format=json\|dot\|mermaid\|d2\|graphml\|excalidraw\|html`, `?group_by=provider\|account\|region`) |
 | `POST /api/v1/topology`               | Same graph engine, but builds from assets in the request body — no audit, instant                |
+| `GET /api/v1/reach`                   | Reachability query over the graph (`?exposed=true`, `?from=`, `?to=`, `?kinds=`, `?max_hops=`); same format set as `topology` |
+| `POST /api/v1/reach`                  | Same query, built from assets in the request body — no audit, instant                            |
 
 Production deployments should sit behind a real reverse proxy (TLS
 termination, rate-limiting, IP allowlist). Built-in `basic` / `token`
@@ -219,20 +284,52 @@ GitHub Actions live in `.github/workflows/`:
 ## Topology
 
 `auditor topology` walks the inventory and infers the request-path graph
-between assets: DNS → security → cloud LB → cluster gateway → Service.
-Edges carry a `confidence` field (`exact` for same-cluster lookups,
-`heuristic` for cross-cloud IP/hostname matches) so the rendered graph
-makes its guesses visible.
+between assets: DNS → security → cloud LB → cluster gateway → Service →
+backing Pods, alongside the OCI network backbone (subnet / gateway / OKE
+cluster → VCN, network-LB → subnet). Edges carry a `confidence` field
+(`exact` for authoritative same-provider joins, `heuristic` for cross-cloud
+IP/hostname matches) so the rendered graph makes its guesses visible.
+
+On top of those request paths it derives **traffic-flow** edges from policy —
+Kubernetes NetworkPolicies, Tailscale ACL rules, and NetBird policy rules —
+rendered green for `traffic-allow` and red for `traffic-deny`, so a firewall's
+denials never read as reachability. Each rule stays in the graph as a node
+(`source → rule → destination`), which keeps a catch-all "allow everything"
+rule linear instead of a source × destination cross-product.
+
+`--detail low|medium|high` picks the altitude: every asset, one node per
+group + resource type, or one box per provider for the executive network
+diagram. See [docs/configuration.md](./docs/configuration.md#auditor-topology).
 
 ```bash
 # Render to SVG via Graphviz (the typical runbook flow).
 auditor topology -o dot | dot -Tsvg > flow.svg
 
+# Cluster nodes by cloud (or account / region) for a readable big-picture view.
+auditor topology -o dot --group-by provider | dot -Tsvg > flow.svg
+
+# High-level network diagram: one box per provider, arrows weighted by how many
+# underlying relationships they stand for. (--detail medium keeps resource types.)
+auditor topology --detail high -o dot | dot -Tsvg > overview.svg
+
+# Just the traffic-flow view — who may reach whom, from Kubernetes
+# NetworkPolicies, Tailscale ACLs, and NetBird policies.
+auditor topology -o json | jq '.edges[] | select(.kind | startswith("traffic-"))'
+
 # Trace a single hostname.
 auditor topology --hostname api.example.com -o mermaid
 
-# Editable hand-drawn diagram — drop the file into excalidraw.com or
-# the Excalidraw desktop app and drag nodes around; arrows stay attached.
+# Modern auto-layout via D2 (d2lang.com); containers mirror --group-by.
+auditor topology -o d2 --group-by provider > topology.d2 && d2 topology.d2 topology.svg
+
+# GraphML for desktop graph tools — import into yEd, Gephi, or Cytoscape and
+# color / filter by the provider, region, type, and status node attributes.
+auditor topology -o graphml > topology.graphml
+
+# Editable diagram with per-service icons — drop the file into excalidraw.com
+# or the Excalidraw desktop app and drag cards around; each node carries an
+# embedded service glyph (DNS, load balancer, database, …) and the icon +
+# label + box move together; arrows stay attached.
 auditor topology -o excalidraw > topology.excalidraw
 
 # Standalone interactive diagram — one self-contained HTML file with the
@@ -257,6 +354,38 @@ frontend choice in Phase 5. Instead, the web UI's **Topology tab**
 renders an interactive force-directed diagram with hand-rolled SVG
 (pan / zoom / drag / details panel), and the JSON endpoint exists so
 an out-of-tree dashboard can build whatever view it wants on top.
+
+## Reachability
+
+`auditor reach` answers the questions an auditor actually asks, over the graph
+`topology` builds:
+
+```bash
+auditor reach --exposed                       # what can the internet reach?
+auditor reach --to '*postgres*'               # what can reach the database?
+auditor reach --from api.example.com --to '*pod*'   # trace every route
+auditor reach --to '*db*' --kinds traffic-allow     # only what policy permits
+auditor reach --exposed --exit-code           # CI gate
+```
+
+Every answer is a path, not a yes/no — the useful part of "yes, the internet
+can reach your database" is the hop list that makes it true:
+
+```
+1. postgres-0 (v1.Pod)  (5 hops)
+     api.example.com (cloudflare.dns_record) --[dns ~]--> prod-lb (oci.load_balancer)
+       prod-lb (oci.load_balancer) --[lb-backend ~]--> api (v1.Service)
+         api (v1.Service) --[service-backend]--> api-abc (v1.Pod)
+           api-abc (v1.Pod) --[traffic-allow:5432]--> db-allow (NetworkPolicy)
+             db-allow (NetworkPolicy) --[traffic-allow:5432]--> postgres-0 (v1.Pod)
+```
+
+Two deliberate behaviours worth knowing: `traffic-deny` edges are **not**
+followed by default (a deny states traffic does not flow, so traversing it
+would invent forbidden routes), and an empty result says plainly that absence
+of a path is not proof of isolation — the graph is inferred, so its silence is
+weaker than a negative. Full details in
+[docs/configuration.md](./docs/configuration.md#auditor-reach).
 
 ## Drift detection
 
@@ -388,6 +517,9 @@ CSV mode emits the same fields as columns and flattens `tags` to
 | `just tidy`         | `go mod tidy`                                                   |
 | `just smoke`        | Build, then assert the Phase 1 exit criteria                    |
 | `just docker`       | Multi-stage image build — wired in Phase 6, fails until then    |
+| `just web`          | Rebuild the Next.js UI into `internal/server/webui/` (**commit the result**) |
+| `just web-dev`      | Frontend hot-reload dev server (run `auditor serve` alongside it) |
+| `just web-verify`   | Fail if the embedded UI is stale vs `web/` — what CI runs        |
 
 Run `just` with no args to list recipes.
 
@@ -429,7 +561,7 @@ A full extending guide ships in Phase 9.
 | 7 — Helm chart              | shipped  | `deploy/helm/cloud-asset-auditor/` — CronJob (default, optional PVC for persisted output) and Deployment (Service + optional Ingress) modes. BYO credentials Secret (`existingSecret`). Read-only `get,list` ClusterRole (overridable). Example values for both modes |
 | 8 — GitHub Actions          | shipped  | `ci.yml` (test + lint + gosec + helm lint + smoke), `release.yml` (goreleaser cross-build + cosign keyless + SBOM), `docker.yml` (multi-arch GHCR push + cosign image sign + Trivy SARIF), reusable `actions/audit` composite |
 | 9 — Docs                    | shipped  | [`docs/configuration.md`](./docs/configuration.md), [`docs/providers.md`](./docs/providers.md), [`docs/extending.md`](./docs/extending.md). README install paths cover prebuilt release / `go install` / from-source / Docker / Helm |
-| 10 — Network topology       | shipped  | `auditor topology` subcommand → JSON / DOT / Mermaid / **Excalidraw** (LR-layered layout, color-coded per provider, dashed arrows for heuristic edges, deterministic seeds for diff-friendly output). Resolvers: `dnsToTarget` (cross-cloud heuristic), `wafBinding` (CF ruleset / Access app / tunnel / page rule → zone, exact), `lbToGateway` (OCI LB → K8s Service by external IP), `gatewayToService` (Ingress / HTTPRoute → backing Service, exact). `/api/v1/topology` returns JSON by default or any format via `?format=` |
+| 10 — Network topology       | shipped  | `auditor topology` subcommand → JSON / DOT / Mermaid / **Excalidraw** (LR-layered layout, per-service embedded icons, provider-accented cards, dashed arrows for heuristic edges, deterministic seeds for diff-friendly output). Resolvers: `dnsToTarget` (cross-cloud heuristic), `wafBinding` (CF ruleset / Access app / tunnel / page rule → zone, exact), `lbToGateway` (OCI LB → K8s Service by external IP), `gatewayToService` (Ingress / HTTPRoute → backing Service, exact). `/api/v1/topology` returns JSON by default or any format via `?format=` |
 
 ## Docs
 

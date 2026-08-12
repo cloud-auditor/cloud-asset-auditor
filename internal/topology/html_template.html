@@ -49,6 +49,11 @@
   .topo-legend .dot, .topo-edge-list .dot { width: .6rem; height: .6rem; border-radius: 50%; flex: none; }
 
   .topo-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 1rem; text-align: center; color: var(--fg-muted); font-style: italic; pointer-events: none; }
+  /* Setting `display` on the class defeats the UA's `[hidden] { display: none }`
+     — a class rule outranks an attribute selector — so the script's
+     `empty.hidden = …` had no effect and the empty-state text was painted over
+     every graph, however many nodes it had. */
+  .topo-empty[hidden] { display: none; }
 
   .topo-panel { position: absolute; top: 0; right: 0; bottom: 0; width: 22rem; padding: .8rem 1rem; background: var(--bg); border-left: 1px solid var(--border); box-shadow: -4px 0 12px rgba(31, 35, 40, .07); transform: translateX(105%); transition: transform .2s ease; overflow-y: auto; }
   .topo-panel.open { transform: none; }
@@ -117,11 +122,24 @@
   // Node fill by provider; edge stroke by kind. Single source of truth:
   // the arrowhead markers and the legend are both generated from these.
 
+  // Every provider the binary can register. A provider missing from here does
+  // not fail loudly — it silently renders in the grey fallback and shows up in
+  // the legend as "other", which reads as "unclassified" rather than
+  // "tailscale". Add a colour here when you add a provider.
   const PROVIDER_COLORS = {
     cloudflare: "#f6821f",
     oci:        "#c74634",
     kubernetes: "#326ce5",
+    gcp:        "#00a1c9",
+    netbird:    "#b45309",
+    tailscale:  "#6b46c1",
   };
+  // Brand hues collide in two pairs — Cloudflare/NetBird are both orange,
+  // Kubernetes/GCP both blue. GCP and NetBird are pulled along their own hue
+  // (cyan-ward, darker) rather than replaced with an off-brand colour: this
+  // page is always light, so separating by lightness alone would have left one
+  // of each pair washed out. Every mark is label-paired anyway, so colour is
+  // reinforcement rather than the only signal.
   const PROVIDER_FALLBACK = "#6b7280";
 
   const EDGE_COLORS = {

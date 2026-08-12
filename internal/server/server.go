@@ -1,9 +1,9 @@
 // Package server is the Phase 5 web UI. It serves an embedded single-page
 // app plus a versioned JSON/SSE API for running audits from a browser.
 //
-// Deviation from init-plan.md §3 Phase 5: the frontend is plain JS rather
-// than Alpine.js. Keeps the binary fully self-contained with no third-party
-// vendored JS and a smaller payload.
+// The frontend is a Next.js app (source in web/ at the repo root) built in
+// static-export mode and embedded from internal/server/webui/ — see embed.go.
+// The binary stays fully self-contained: no Node runtime, no CDN, no sidecar.
 package server
 
 import (
@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"path"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -30,6 +32,17 @@ type Config struct {
 	MaxConcurrency int
 	IncludeRaw     bool
 	ShutdownGrace  time.Duration
+
+	// Providers scopes what a request that names no providers will run.
+	// Empty means "every registered provider", which is the historical
+	// behaviour and the right default for an operator who configured
+	// credentials and wants everything.
+	//
+	// It exists because `serve --demo` must not fall back to "everything":
+	// on a host that also has real credentials, a browser request omitting
+	// the parameter would blend fabricated demo assets into a real
+	// inventory, and nothing downstream distinguishes them.
+	Providers []string
 }
 
 // Server bundles the HTTP server with its parsed config so handlers can
@@ -37,6 +50,11 @@ type Config struct {
 type Server struct {
 	cfg Config
 	mux *http.ServeMux
+
+	// patterns records every route passed to handle/handleFunc, in
+	// registration order. Used by the openapi sync test; not part of the
+	// public surface.
+	patterns []string
 }
 
 // New constructs a Server with handlers registered. It does not bind any
@@ -111,28 +129,45 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-func (s *Server) routes() {
-	// Static frontend (embedded). fs.Sub strips the web/ prefix so /
-	// resolves to web/index.html, /app.js → web/app.js, etc.
-	staticFS, err := fs.Sub(WebFS, "web")
-	if err != nil {
-		// embed.go declares the FS at package init; sub of "web/" cannot
-		// fail unless the directory was renamed in the source tree.
-		panic(fmt.Sprintf("server: web/ subtree missing from embed.FS: %v", err))
-	}
-	s.mux.Handle("/", http.FileServer(http.FS(staticFS)))
+// handle registers a pattern and records it, so a test can assert that every
+// route the server actually serves is described in openapi.yaml. The spec is
+// hand-maintained; without the recorded list, the sync check can only run in
+// the documented→handler direction and a new undocumented handler passes CI
+// while leaving the spec quietly lying.
+func (s *Server) handle(pattern string, h http.Handler) {
+	s.patterns = append(s.patterns, pattern)
+	s.mux.Handle(pattern, h)
+}
 
-	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+func (s *Server) handleFunc(pattern string, h http.HandlerFunc) {
+	s.handle(pattern, h)
+}
+
+func (s *Server) routes() {
+	// Static frontend (embedded). fs.Sub strips the webui/ prefix so /
+	// resolves to webui/index.html, /topology/ → webui/topology/index.html.
+	staticFS, err := fs.Sub(WebFS, "webui")
+	if err != nil {
+		// embed.go declares the FS at package init; sub of "webui/" cannot
+		// fail unless the directory was renamed in the source tree.
+		panic(fmt.Sprintf("server: webui/ subtree missing from embed.FS: %v", err))
+	}
+	s.mux.Handle("/", spaHandler(staticFS))
+
+	s.handleFunc("GET /healthz", s.handleHealthz)
 	// /metrics is always open (matches /healthz semantics: scrapers
 	// shouldn't need credentials) and exempted from the auth middleware
 	// by needsAuth's "/api/" check.
-	s.mux.Handle("GET /metrics", metrics.Handler())
-	s.mux.HandleFunc("GET /api/v1/openapi.yaml", s.handleOpenAPI)
-	s.mux.HandleFunc("GET /api/v1/providers", s.handleProviders)
-	s.mux.HandleFunc("GET /api/v1/audit", s.handleAuditSSE)
-	s.mux.HandleFunc("GET /api/v1/audit/export", s.handleAuditExport)
-	s.mux.HandleFunc("GET /api/v1/topology", s.handleTopology)
-	s.mux.HandleFunc("POST /api/v1/topology", s.handleTopologyBuild)
+	s.handle("GET /metrics", metrics.Handler())
+	s.handleFunc("GET /api/v1/openapi.yaml", s.handleOpenAPI)
+	s.handleFunc("GET /api/v1/providers", s.handleProviders)
+	s.handleFunc("GET /api/v1/kube/contexts", s.handleKubeContexts)
+	s.handleFunc("GET /api/v1/audit", s.handleAuditSSE)
+	s.handleFunc("GET /api/v1/audit/export", s.handleAuditExport)
+	s.handleFunc("GET /api/v1/topology", s.handleTopology)
+	s.handleFunc("POST /api/v1/topology", s.handleTopologyBuild)
+	s.handleFunc("GET /api/v1/reach", s.handleReach)
+	s.handleFunc("POST /api/v1/reach", s.handleReachBuild)
 }
 
 // handleOpenAPI serves the embedded OpenAPI 3.1 spec verbatim. Spec
@@ -164,4 +199,58 @@ func validateAuth(cfg Config) error {
 	default:
 		return fmt.Errorf("unknown auth mode %q (want none|basic|token)", cfg.AuthMode)
 	}
+}
+
+// spaHandler serves the exported Next.js frontend.
+//
+// It is http.FileServer with two adjustments the export needs:
+//
+//   - Unknown paths get the exported 404.html instead of Go's plain-text
+//     "404 page not found". The export is a fixed set of routes (there is no
+//     client-side router to hand an unknown path to), so a miss really is a
+//     miss — it should just look like the rest of the app.
+//   - Hashed build artefacts under /_next/static/ are marked immutably
+//     cacheable. Their names contain a content hash, so a stale copy is
+//     impossible by construction, and this turns every reload after the first
+//     into zero requests for the bulk of the payload. Everything else stays
+//     uncached: index.html must be revalidated or a redeployed binary would
+//     keep serving the previous build's HTML.
+func spaHandler(static fs.FS) http.Handler {
+	files := http.FileServer(http.FS(static))
+	notFound, _ := fs.ReadFile(static, "404.html")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/_next/static/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+
+		if len(notFound) > 0 && !staticFileExists(static, r.URL.Path) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write(notFound)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
+}
+
+// staticFileExists reports whether a request path resolves to something in
+// the embedded tree — either a file, or a directory holding an index.html
+// (which is how every exported route is shaped).
+func staticFileExists(static fs.FS, urlPath string) bool {
+	name := strings.TrimPrefix(path.Clean("/"+urlPath), "/")
+	if name == "" {
+		name = "."
+	}
+	info, err := fs.Stat(static, name)
+	if err != nil {
+		return false
+	}
+	if !info.IsDir() {
+		return true
+	}
+	_, err = fs.Stat(static, path.Join(name, "index.html"))
+	return err == nil
 }

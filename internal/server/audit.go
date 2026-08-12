@@ -23,8 +23,8 @@ import (
 // is done). initErrors holds factory-time failures (e.g. missing tokens) —
 // we can't push these through the error channel because they happen before
 // it exists, and they're useful to render distinctly in the UI.
-func (s *Server) runProviders(ctx context.Context, names []string) (assets <-chan core.Asset, errs <-chan error, initErrors []string) {
-	selected, initErrors := s.selectProviders(names)
+func (s *Server) runProviders(ctx context.Context, names []string, opts reqOptions) (assets <-chan core.Asset, errs <-chan error, initErrors []string) {
+	selected, initErrors := s.selectProviders(names, opts)
 
 	a := make(chan core.Asset)
 	e := make(chan error)
@@ -75,10 +75,26 @@ func (s *Server) runProviders(ctx context.Context, names []string) (assets <-cha
 	return a, e, initErrors
 }
 
+// reqOptions carries the per-request knobs a browser is allowed to influence.
+// Deliberately narrow: credentials (tokens, OCI profiles, region/compartment
+// lists) stay server-startup config and are never client-controllable.
+// KubeContexts is the
+// exception — it only selects among contexts the operator already defined in
+// the server's kubeconfig (the handler validates against that known set), so
+// it picks an existing cluster rather than supplying new credentials.
+type reqOptions struct {
+	kubeContexts []string
+}
+
 // selectProviders mirrors the CLI's selection logic but accumulates
 // factory failures in a slice (returned to the caller) instead of writing
 // to stderr — handlers route them into SSE events or HTTP responses.
-func (s *Server) selectProviders(names []string) ([]core.Provider, []string) {
+func (s *Server) selectProviders(names []string, opts reqOptions) ([]core.Provider, []string) {
+	if len(names) == 0 {
+		// The operator's configured scope wins over "everything registered"
+		// — see Config.Providers for why the fallback is not always safe.
+		names = s.cfg.Providers
+	}
 	if len(names) == 0 {
 		names = core.Registered()
 	}
@@ -106,17 +122,19 @@ func (s *Server) selectProviders(names []string) ([]core.Provider, []string) {
 			slog.Warn("provider failed to initialize", "provider", n, "error", err)
 			continue
 		}
-		s.applyProviderOptions(p)
+		s.applyProviderOptions(p, opts)
 		out = append(out, p)
 	}
 	return out, initErrs
 }
 
 // applyProviderOptions pushes the server's configured per-provider knobs.
-// For the web UI, regions / kube context / etc. come from the operator's
-// env at server startup, not from the browser — those credentials must
-// not be controllable from the client side.
-func (s *Server) applyProviderOptions(p core.Provider) {
+// For the web UI, regions / compartments / credentials / etc. come from the
+// operator's env at server startup, not from the browser — those must not be
+// controllable from the client side. The one per-request knob is the
+// Kubernetes context selection (opts.kubeContexts), already validated by the
+// handler against the server's own kubeconfig.
+func (s *Server) applyProviderOptions(p core.Provider, opts reqOptions) {
 	if c, ok := p.(core.ConcurrencyConfigurable); ok && s.cfg.MaxConcurrency > 0 {
 		c.SetMaxConcurrency(s.cfg.MaxConcurrency)
 	}
@@ -126,7 +144,10 @@ func (s *Server) applyProviderOptions(p core.Provider) {
 	if c, ok := p.(core.ProfileConfigurable); ok {
 		c.SetProfile(os.Getenv("OCI_CLI_PROFILE"))
 	}
-	// Regions / kube context are server-startup config, not per-request.
+	if c, ok := p.(core.KubeConfigurable); ok && len(opts.kubeContexts) > 0 {
+		c.SetKubeContexts(opts.kubeContexts)
+	}
+	// Regions / compartments / OCI profile are server-startup config, not per-request.
 }
 
 // forward copies values from one provider's channels onto the fan-in
