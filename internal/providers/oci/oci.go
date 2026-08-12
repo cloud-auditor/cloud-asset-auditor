@@ -50,14 +50,39 @@ type Provider struct {
 	// Object Storage's namespace is tenancy-global; resolve it once and
 	// share the result across every per-(region, compartment) bucket
 	// collector instead of paying a GetNamespace round-trip each time.
-	nsOnce sync.Once
+	//
+	// A mutex rather than a sync.Once because only *success* may be cached.
+	// Once caches whatever the first call produced, so one transient
+	// GetNamespace failure — a 500, a timeout, a network blip — permanently
+	// disabled bucket collection in every region for the rest of the process,
+	// and handed every later caller the stale error as though it were fresh.
+	// Silently losing a resource type for a whole audit is exactly the failure
+	// an inventory tool must not have.
+	nsMu   sync.Mutex
 	nsName string
-	nsErr  error
 
 	// listSubscribed resolves the tenancy's subscribed regions. It's a field
 	// so tests can stub the identity API without live auth; nil means "use the
 	// real SDK call" (listSubscribedRegions).
 	listSubscribed func(ctx context.Context) ([]string, error)
+
+	// endpoint overrides the API host every SDK client talks to. It is "" in
+	// production (each client keeps the host SetRegion computed); tests point it
+	// at an httptest server so the *real* SDK — its pagination, its query-param
+	// encoding, its error decoding — executes against a local fixture. There is
+	// no env var or SDK option that can do this: SetRegion unconditionally
+	// recomputes BaseClient.Host from the region, so the override has to be
+	// applied after it. See retarget.
+	endpoint string
+}
+
+// retarget points an SDK client at p.endpoint when one is set. Every OCI client
+// embeds an exported common.BaseClient, so this works uniformly across the ~19
+// service clients. MUST be called after SetRegion — SetRegion overwrites Host.
+func (p *Provider) retarget(bc *common.BaseClient) {
+	if p.endpoint != "" {
+		bc.Host = p.endpoint
+	}
 }
 
 // Compile-time checks for the optional interfaces.

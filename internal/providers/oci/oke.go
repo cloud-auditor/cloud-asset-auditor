@@ -18,6 +18,7 @@ func (p *Provider) collectOKEClusters(ctx context.Context, region, compartmentOC
 		return fmt.Errorf("container engine client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {

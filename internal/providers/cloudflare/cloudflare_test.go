@@ -1,9 +1,7 @@
 package cloudflare
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
@@ -196,12 +194,4 @@ func TestRegisteredFactory_FailsWithoutEnvToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected factory error with empty CLOUDFLARE_API_TOKEN")
 	}
-}
-
-func TestValidate_NetworkPath_Skipped(_ *testing.T) {
-	// Validate hits the real Cloudflare API, so it lives in an integration
-	// test (build-tag-gated) — not here. This placeholder keeps the
-	// intent visible.
-	_ = context.Background
-	_ = errors.New
 }

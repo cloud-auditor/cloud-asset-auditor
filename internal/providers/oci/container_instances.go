@@ -17,6 +17,7 @@ func (p *Provider) collectContainerInstances(ctx context.Context, region, compar
 		return fmt.Errorf("container instances client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {

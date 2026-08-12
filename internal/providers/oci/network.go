@@ -19,6 +19,7 @@ func (p *Provider) collectVCNs(ctx context.Context, region, compartmentOCID stri
 		return fmt.Errorf("virtual network client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {
@@ -72,6 +73,7 @@ func (p *Provider) collectSubnets(ctx context.Context, region, compartmentOCID s
 		return fmt.Errorf("virtual network client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {
@@ -122,6 +124,7 @@ func (p *Provider) collectNATGateways(ctx context.Context, region, compartmentOC
 		return fmt.Errorf("virtual network client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {
@@ -173,6 +176,7 @@ func (p *Provider) collectInternetGateways(ctx context.Context, region, compartm
 		return fmt.Errorf("virtual network client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {
@@ -223,6 +227,7 @@ func (p *Provider) collectServiceGateways(ctx context.Context, region, compartme
 		return fmt.Errorf("virtual network client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {
@@ -273,6 +278,7 @@ func (p *Provider) collectLocalPeeringGateways(ctx context.Context, region, comp
 		return fmt.Errorf("virtual network client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {
@@ -326,6 +332,7 @@ func (p *Provider) collectDRGs(ctx context.Context, region, compartmentOCID stri
 		return fmt.Errorf("virtual network client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {

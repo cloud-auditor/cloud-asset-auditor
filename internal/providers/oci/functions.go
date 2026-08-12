@@ -19,6 +19,7 @@ func (p *Provider) collectFunctions(ctx context.Context, region, compartmentOCID
 		return fmt.Errorf("functions client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {

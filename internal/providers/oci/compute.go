@@ -18,6 +18,7 @@ func (p *Provider) collectComputeInstances(ctx context.Context, region, compartm
 		return fmt.Errorf("compute client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {

@@ -18,6 +18,7 @@ func (p *Provider) collectObjectStorageBuckets(ctx context.Context, region, comp
 		return fmt.Errorf("object storage client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	ns, err := p.objectStorageNamespace(ctx, client)
 	if err != nil {
@@ -46,19 +47,27 @@ func (p *Provider) collectObjectStorageBuckets(ctx context.Context, region, comp
 	}
 }
 
-// objectStorageNamespace resolves the tenancy's Object Storage namespace
-// exactly once. It's a tenancy-global value, so the result (or error) is
-// cached and shared by every concurrent bucket collector.
+// objectStorageNamespace resolves the tenancy's Object Storage namespace once
+// and shares it with every concurrent bucket collector.
+//
+// Only success is cached. A failure is left uncached so the next collector
+// retries: the namespace is required to list a bucket, so caching a transient
+// error would drop Object Storage from the entire audit on one unlucky call.
+// The mutex means a failing lookup is retried at most once per waiting
+// collector rather than by all of them at once.
 func (p *Provider) objectStorageNamespace(ctx context.Context, client objectstorage.ObjectStorageClient) (string, error) {
-	p.nsOnce.Do(func() {
-		resp, err := client.GetNamespace(ctx, objectstorage.GetNamespaceRequest{})
-		if err != nil {
-			p.nsErr = err
-			return
-		}
-		p.nsName = derefStr(resp.Value)
-	})
-	return p.nsName, p.nsErr
+	p.nsMu.Lock()
+	defer p.nsMu.Unlock()
+
+	if p.nsName != "" {
+		return p.nsName, nil
+	}
+	resp, err := client.GetNamespace(ctx, objectstorage.GetNamespaceRequest{})
+	if err != nil {
+		return "", err
+	}
+	p.nsName = derefStr(resp.Value)
+	return p.nsName, nil
 }
 
 // bucketToAsset maps a bucket summary. Buckets have no OCID in the list

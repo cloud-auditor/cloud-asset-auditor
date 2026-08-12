@@ -138,6 +138,9 @@ func (p *Provider) newIdentityClient() (identity.IdentityClient, error) {
 	if err != nil {
 		return client, fmt.Errorf("identity client: %w", err)
 	}
+	// Single choke point for every identity caller (compartments, policies,
+	// users, groups, dynamic groups, region subscriptions, Validate).
+	p.retarget(&client.BaseClient)
 	return client, nil
 }
 

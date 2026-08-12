@@ -16,6 +16,7 @@ func (p *Provider) collectVaults(ctx context.Context, region, compartmentOCID st
 		return fmt.Errorf("kms vault client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {

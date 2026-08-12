@@ -22,6 +22,7 @@ func (p *Provider) collectLoadBalancers(ctx context.Context, region, compartment
 		return fmt.Errorf("load balancer client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {

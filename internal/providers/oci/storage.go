@@ -18,6 +18,7 @@ func (p *Provider) collectBlockVolumes(ctx context.Context, region, compartmentO
 		return fmt.Errorf("blockstorage client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {
@@ -68,6 +69,7 @@ func (p *Provider) collectBootVolumes(ctx context.Context, region, compartmentOC
 		return fmt.Errorf("blockstorage client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {

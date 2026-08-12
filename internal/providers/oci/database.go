@@ -17,6 +17,7 @@ func (p *Provider) collectAutonomousDatabases(ctx context.Context, region, compa
 		return fmt.Errorf("database client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {
@@ -66,6 +67,7 @@ func (p *Provider) collectDBSystems(ctx context.Context, region, compartmentOCID
 		return fmt.Errorf("database client: %w", err)
 	}
 	client.SetRegion(region)
+	p.retarget(&client.BaseClient)
 
 	var page *string
 	for {
