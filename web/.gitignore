@@ -5,3 +5,8 @@ node_modules/
 out/
 next-env.d.ts
 *.tsbuildinfo
+
+# Written by `next dev` on every start (see the note inside them). Generated,
+# not authored — the project's own guidance lives in the repo-root CLAUDE.md.
+AGENTS.md
+CLAUDE.md

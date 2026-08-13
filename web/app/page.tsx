@@ -12,6 +12,7 @@ import { vars } from '@/lib/css';
 import { Icon } from '@/lib/icons';
 import type { ProviderStat } from '@/lib/types';
 import './dashboard.css';
+import { fmtCount } from '@/lib/format';
 
 
 /** What one provider contributed, kept per provider so cross-filtering the
@@ -313,7 +314,7 @@ export default function DashboardPage() {
               live={running}
               sub={
                 running
-                  ? `${lastSecond.toLocaleString()}/s`
+                  ? `${fmtCount(lastSecond)}/s`
                   : elapsedMs != null
                     ? `in ${formatSpan(elapsedMs)}`
                     : undefined
@@ -322,7 +323,7 @@ export default function DashboardPage() {
                 arrivalValues.length > 1 ? (
                   <Sparkline
                     values={arrivalValues}
-                    label={`Arrival rate over the last ${arrivalValues.length} seconds, peaking at ${peak.toLocaleString()} assets per second.`}
+                    label={`Arrival rate over the last ${arrivalValues.length} seconds, peaking at ${fmtCount(peak)} assets per second.`}
                   />
                 ) : undefined
               }
@@ -346,7 +347,7 @@ export default function DashboardPage() {
               icon="building"
               sub={
                 agg.unattributed > 0
-                  ? `${agg.unattributed.toLocaleString()} unattributed`
+                  ? `${fmtCount(agg.unattributed)} unattributed`
                   : undefined
               }
               title="Distinct account, tenancy, or cluster identifiers, counted per provider."
@@ -425,14 +426,14 @@ export default function DashboardPage() {
                           style={vars({ '--rail': providerColor(name) })}
                           data-on={activeFocus === name ? 'true' : undefined}
                           aria-pressed={activeFocus === name}
-                          aria-label={`${name}: ${s.count.toLocaleString()} assets, ${share.toFixed(0)} percent of inventory, ${span}, ${s.errors} error${s.errors === 1 ? '' : 's'}, ${st.text}. Filter the lists below to ${name}.`}
+                          aria-label={`${name}: ${fmtCount(s.count)} assets, ${share.toFixed(0)} percent of inventory, ${span}, ${s.errors} error${s.errors === 1 ? '' : 's'}, ${st.text}. Filter the lists below to ${name}.`}
                           onClick={() => setFocus(activeFocus === name ? null : name)}
                         >
                           <span className="health-name truncate">
                             <span className="dot" style={{ background: providerColor(name) }} />
                             {name}
                           </span>
-                          <span className="mono ar">{s.count.toLocaleString()}</span>
+                          <span className="mono ar">{fmtCount(s.count)}</span>
                           <span className="meter">
                             <span
                               className="meter-fill"
@@ -474,8 +475,8 @@ export default function DashboardPage() {
               </span>
               <span className="dim">
                 Types and regions below are scoped to {activeFocus} —{' '}
-                <span className="mono">{scopedTotal.toLocaleString()}</span> of{' '}
-                <span className="mono">{assets.length.toLocaleString()}</span> assets.
+                <span className="mono">{fmtCount(scopedTotal)}</span> of{' '}
+                <span className="mono">{fmtCount(assets.length)}</span> assets.
               </span>
             </div>
           )}
@@ -486,7 +487,7 @@ export default function DashboardPage() {
                 Top resource types
                 {activeFocus && <span className="chip">{activeFocus}</span>}
                 <span className="spacer" />
-                <span className="hint">{agg.types.size.toLocaleString()} distinct</span>
+                <span className="hint">{fmtCount(agg.types.size)} distinct</span>
               </div>
               <div className="card-body">
                 <BarList rows={typeRows} total={scopedTotal} />
@@ -498,7 +499,7 @@ export default function DashboardPage() {
                 By region
                 {activeFocus && <span className="chip">{activeFocus}</span>}
                 <span className="spacer" />
-                <span className="hint">{agg.regions.size.toLocaleString()} distinct</span>
+                <span className="hint">{fmtCount(agg.regions.size)} distinct</span>
               </div>
               <div className="card-body">
                 <BarList

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Icon } from '@/lib/icons';
+import { fmtCount } from '@/lib/format';
 
 /**
  * A collapsible viewer for an asset's `raw` payload.
@@ -176,7 +177,7 @@ function JsonNode({
                 className="json-more"
                 onClick={() => setShown((s) => Math.min(n, s + CHUNK * 4))}
               >
-                … {(n - shown).toLocaleString()} more
+                … {fmtCount(n - shown)} more
               </button>
             </div>
           )}

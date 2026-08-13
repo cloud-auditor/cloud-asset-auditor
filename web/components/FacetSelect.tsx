@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/lib/icons';
+import { fmtCount } from '@/lib/format';
 
 /**
  * A multi-select facet popover.
@@ -259,7 +260,7 @@ export function FacetSelect({ label, options, selected, onChange, glyph }: Facet
                   {o.color && <span className="dot" style={{ background: o.color }} />}
                   <span className="truncate">{o.value}</span>
                   <span className="spacer" />
-                  <span className="mono faint">{o.count.toLocaleString()}</span>
+                  <span className="mono faint">{fmtCount(o.count)}</span>
                 </div>
               );
             })}

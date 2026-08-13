@@ -34,6 +34,7 @@ import {
   type Edge,
   type GroupBy,
 } from '@/lib/types';
+import { fmtCount } from '@/lib/format';
 
 interface Props {
   nodes: Asset[];
@@ -883,7 +884,7 @@ export function GraphCanvas({
                 >
                   <span className="dot" style={{ background: c }} />
                   {EDGE_LABELS[k] ?? k}
-                  <span className="count-badge">{n.toLocaleString()}</span>
+                  <span className="count-badge">{fmtCount(n)}</span>
                 </button>
               );
             })}

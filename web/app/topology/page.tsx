@@ -8,6 +8,7 @@ import { GraphCanvas } from '@/components/GraphCanvas';
 import { buildTopology, fetchTopology, topologyDownloadURL, type TopologyParams } from '@/lib/api';
 import { Icon } from '@/lib/icons';
 import { EDGE_KINDS, type DetailLevel, type GroupBy, type Topology } from '@/lib/types';
+import { fmtCount } from '@/lib/format';
 
 /**
  * Above this many nodes the force layout stops being useful — the picture is
@@ -313,11 +314,11 @@ export default function TopologyPage() {
             {loading ? (
               <>
                 <h3>Building the graph…</h3>
-                <p>Running the resolvers over {assets.length.toLocaleString()} assets.</p>
+                <p>Running the resolvers over {fmtCount(assets.length)} assets.</p>
               </>
             ) : assets.length > 0 ? (
               <>
-                <h3>{assets.length.toLocaleString()} assets ready</h3>
+                <h3>{fmtCount(assets.length)} assets ready</h3>
                 <p>
                   Build the graph from what this browser already holds — instant, and it costs no
                   provider API calls.
@@ -350,10 +351,10 @@ export default function TopologyPage() {
         <div className="card topo-guard">
           <div className="empty">
             <Icon name="layers" size={30} strokeWidth={1.2} />
-            <span className="n">{topo.nodes.length.toLocaleString()}</span>
+            <span className="n">{fmtCount(topo.nodes.length)}</span>
             <h3>Too many nodes to lay out legibly</h3>
             <p>
-              Past about {MAX_RENDERED_NODES.toLocaleString()} the force layout draws a hairball and
+              Past about {fmtCount(MAX_RENDERED_NODES)} the force layout draws a hairball and
               the all-pairs repulsion starts dropping frames. Collapse the graph instead, or take it
               somewhere built for the scale — GraphML opens in yEd, Gephi, or Cytoscape, which lay out
               tens of thousands of nodes.
@@ -373,14 +374,14 @@ export default function TopologyPage() {
         <>
           <div className="topo-counts">
             <span>
-              <b>{topo.nodes.length.toLocaleString()}</b> nodes
+              <b>{fmtCount(topo.nodes.length)}</b> nodes
             </span>
             <span>
-              <b>{topo.edges.length.toLocaleString()}</b> edges
+              <b>{fmtCount(topo.edges.length)}</b> edges
             </span>
             {trafficEdges > 0 && (
               <span>
-                <b>{trafficEdges.toLocaleString()}</b> traffic-flow
+                <b>{fmtCount(trafficEdges)}</b> traffic-flow
               </span>
             )}
             <span className="spacer" />

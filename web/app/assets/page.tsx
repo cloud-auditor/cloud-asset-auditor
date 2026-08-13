@@ -12,6 +12,7 @@ import { providerColor, statusTone, toneColor } from '@/lib/colors';
 import { AssetIcon, Icon } from '@/lib/icons';
 import type { Asset } from '@/lib/types';
 import './assets.css';
+import { fmtCount } from '@/lib/format';
 
 type ColKey = 'provider' | 'type' | 'name' | 'region' | 'account_id' | 'status' | 'address';
 type SortKey = Exclude<ColKey, 'address'>;
@@ -428,8 +429,8 @@ export default function AssetsPage() {
           <span className="spacer" />
 
           <span className="assets-count mono" aria-live="polite" data-stale={stale ? 'true' : undefined}>
-            <strong>{filtered.length.toLocaleString()}</strong>
-            <span className="faint"> of {assets.length.toLocaleString()}</span>
+            <strong>{fmtCount(filtered.length)}</strong>
+            <span className="faint"> of {fmtCount(assets.length)}</span>
           </span>
 
           <div className="segmented assets-density" role="group" aria-label="Row density">
@@ -558,7 +559,7 @@ export default function AssetsPage() {
                 <Icon name="filter" size={28} />
                 <h3>No assets match</h3>
                 <p>
-                  {assets.length.toLocaleString()} assets were collected; none of them match the
+                  {fmtCount(assets.length)} assets were collected; none of them match the
                   current search and facets.
                 </p>
                 <div className="row">

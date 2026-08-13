@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAudit } from './AuditProvider';
 import { ThemeToggle } from './ThemeToggle';
 import { fetchProviders } from '@/lib/api';
+import { fmtCount } from '@/lib/format';
 
 const LINKS = [
   { href: '/', label: 'Dashboard' },
@@ -201,7 +202,7 @@ export function Ticker({ value, live }: { value: number; live?: boolean }) {
 
   return (
     <span className="tick" data-live={live ? 'true' : undefined}>
-      {display.toLocaleString()}
+      {fmtCount(display)}
     </span>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Icon, type UIIconName } from '@/lib/icons';
+import { fmtCount } from '@/lib/format';
 
 export interface StatTileProps {
   label: string;
@@ -76,8 +77,8 @@ export function StatTile({ label, value, sub, icon, spark, color, live, title }:
   const numeric = typeof value === 'number';
   const counted = useCountUp(numeric ? value : null);
 
-  const settled = numeric ? value.toLocaleString() : value;
-  const text = numeric ? (counted ?? value).toLocaleString() : value;
+  const settled = numeric ? fmtCount(value) : value;
+  const text = numeric ? fmtCount(counted ?? value) : value;
 
   // Width is reserved for the longer of "where it is" and "where it is going",
   // so crossing 999 → 1,000 mid-count cannot nudge the tiles beside it. `ch` is

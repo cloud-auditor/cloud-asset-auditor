@@ -7,6 +7,7 @@ import { exportURL, topologyDownloadURL } from '@/lib/api';
 import { providerColor } from '@/lib/colors';
 import { match, type FuzzyMatch } from '@/lib/fuzzy';
 import { useTheme, type Theme } from '@/lib/theme';
+import { fmtCount } from '@/lib/format';
 
 const SECTIONS = ['Navigate', 'Audit', 'Export', 'Appearance', 'Assets'] as const;
 type Section = (typeof SECTIONS)[number];
@@ -124,7 +125,7 @@ export function CommandPalette() {
         id: 'audit:clear',
         section: 'Audit',
         label: 'Clear results',
-        hint: `${assets.length.toLocaleString()} assets`,
+        hint: `${fmtCount(assets.length)} assets`,
         run: clear,
       });
     }

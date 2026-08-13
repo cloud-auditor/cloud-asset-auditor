@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { fmtCount } from '@/lib/format';
 
 export interface DonutSegment {
   key: string;
@@ -148,9 +149,9 @@ export function Donut({
   if (total === 0) return null;
 
   const summary =
-    `${total.toLocaleString()} ${unit} across ${slices.length} ` +
+    `${fmtCount(total)} ${unit} across ${slices.length} ` +
     `${slices.length === 1 ? 'segment' : 'segments'}: ` +
-    slices.map((s) => `${s.label} ${s.value.toLocaleString()} (${pct(s.share)})`).join(', ');
+    slices.map((s) => `${s.label} ${fmtCount(s.value)} (${pct(s.share)})`).join(', ');
 
   const pick = (key: string) => onSelect?.(selected === key ? null : key);
 
@@ -204,7 +205,7 @@ export function Donut({
         <div className="donut-center" aria-hidden>
           {activeSlice ? (
             <>
-              <span className="donut-c-v tick">{activeSlice.value.toLocaleString()}</span>
+              <span className="donut-c-v tick">{fmtCount(activeSlice.value)}</span>
               <span className="donut-c-k truncate" title={activeSlice.label}>
                 {activeSlice.label}
               </span>
@@ -212,7 +213,7 @@ export function Donut({
             </>
           ) : (
             <>
-              <span className="donut-c-v tick">{total.toLocaleString()}</span>
+              <span className="donut-c-v tick">{fmtCount(total)}</span>
               <span className="donut-c-k">{unit}</span>
             </>
           )}
@@ -228,7 +229,7 @@ export function Donut({
                 <span className="truncate" title={s.label}>
                   {s.label}
                 </span>
-                <span className="mono donut-n">{s.value.toLocaleString()}</span>
+                <span className="mono donut-n">{fmtCount(s.value)}</span>
                 <span className="mono faint donut-p">{pct(s.share)}</span>
               </>
             );

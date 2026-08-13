@@ -1,4 +1,5 @@
 'use client';
+import { fmtCount } from '@/lib/format';
 
 export interface BarRow {
   label: string;
@@ -71,7 +72,7 @@ export function BarList({
               />
             </span>
             <span className="n">
-              {r.value.toLocaleString()}
+              {fmtCount(r.value)}
               {total > 0 && <span className="faint"> {((r.value / total) * 100).toFixed(0)}%</span>}
             </span>
           </>

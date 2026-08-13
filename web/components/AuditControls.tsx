@@ -6,6 +6,7 @@ import { providerColor } from '@/lib/colors';
 import { vars } from '@/lib/css';
 import { Icon } from '@/lib/icons';
 import type { ProviderStat } from '@/lib/types';
+import { fmtCount } from '@/lib/format';
 
 const SCOPE_KEY = 'auditor-scope-open';
 
@@ -133,7 +134,7 @@ export function AuditControls() {
       )}
       <span className="mono" style={{ fontSize: 'var(--fs-md)' }}>
         <span className="tick" data-live={running || undefined}>
-          {assets.length.toLocaleString()}
+          {fmtCount(assets.length)}
         </span>
         <span className="faint" style={{ marginLeft: 5 }}>
           assets
@@ -241,7 +242,7 @@ export function AuditControls() {
                   >
                     <span className="dot" style={{ background: providerColor(p) }} />
                     {p}
-                    {n > 0 && <span className="count-badge">{n.toLocaleString()}</span>}
+                    {n > 0 && <span className="count-badge">{fmtCount(n)}</span>}
                   </button>
                 );
               })}
@@ -315,7 +316,7 @@ export function AuditControls() {
                         />
                       </span>
                       <span className="mono" style={{ minWidth: 62, textAlign: 'right' }}>
-                        {s.count.toLocaleString()}
+                        {fmtCount(s.count)}
                       </span>
                       <span className="mono faint" style={{ minWidth: 38, textAlign: 'right' }}>
                         {pct.toFixed(0)}%

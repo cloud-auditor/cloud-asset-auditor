@@ -12,6 +12,7 @@ import {
 import { fetchKubeContexts, fetchProviders, streamAudit } from '@/lib/api';
 import { PROVIDERS_WITH_COLOR } from '@/lib/colors';
 import type { ArrivalBucket, Asset, ProviderStat, Toast } from '@/lib/types';
+import { fmtCount } from '@/lib/format';
 
 /** What {@link AuditState.start} may override for a single run. */
 export interface AuditScope {
@@ -421,7 +422,7 @@ export function AuditProvider({ children }: { children: React.ReactNode }) {
               kind: d.errors > 0 ? 'warn' : 'ok',
               title: 'Audit finished',
               body:
-                `${d.count.toLocaleString()} assets in ${(d.elapsed_ms / 1000).toFixed(1)}s` +
+                `${fmtCount(d.count)} assets in ${(d.elapsed_ms / 1000).toFixed(1)}s` +
                 (d.errors > 0 ? ` · ${d.errors} error${d.errors === 1 ? '' : 's'}` : ''),
             });
           },
