@@ -146,6 +146,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newCacheCmd(state))
 	cmd.AddCommand(newCheckCmd(state))
 	cmd.AddCommand(newCostCmd(state))
+	cmd.AddCommand(newInsightsCmd(state))
 	return cmd
 }
 

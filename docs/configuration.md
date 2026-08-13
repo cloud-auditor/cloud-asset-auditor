@@ -599,6 +599,134 @@ present them as current. A cache hit is priced with today's book instead.
 
 ---
 
+## `auditor insights`
+
+Derive findings from an inventory that has already been collected: what is
+reachable from outside, how the network is arranged, what carries no owner,
+what expires soon, where the money is.
+
+This is not a collector. Every number comes from assets the audit already holds
+plus the topology graph it already infers, so a run costs no extra provider API
+calls and works identically against a snapshot from six months ago.
+
+`--include-raw` is forced on internally, like `topology`, `reach` and `cost`:
+several insights read a resource's own document (Kubernetes specs, policy
+bodies, certificate details), and a report that quietly shrank because the
+payloads were absent is the worse failure. (There is therefore no
+`--include-raw` flag here. A `NOT RUN` row that still says "re-run with
+`--include-raw`" means the audit returned nothing that *has* a payload —
+`--from-snapshot` over a snapshot collected without it, or an estate whose
+providers attach none.)
+
+```bash
+auditor insights                                # live audit, table report
+auditor insights --demo                         # synthetic estate, no credentials
+auditor insights --list                         # every question this binary asks
+auditor insights --only exposure,network
+auditor insights --only 'hygiene.*' --severity warn
+auditor insights --cost                         # include the money-shaped findings
+auditor insights --from-snapshot assets.json -o json | jq '.findings[].caveat'
+auditor insights -o markdown >> "$GITHUB_STEP_SUMMARY"
+auditor insights --exit-code                    # CI gate on risk-severity findings
+```
+
+| Flag | Default | Notes |
+| ---- | ------- | ----- |
+| `-o`, `--output string` | `table` | `table`, `json`, `markdown` |
+| `--output-file string` | stdout | `-` is treated as stdout |
+| `--only strings` | (all) | Case-insensitive globs matched against each insight's **id and family** — `exposure`, `hygiene.*`, `*cert*`. Comma-separated or repeatable |
+| `--severity string` | (everything) | Drop findings below this severity: `info`, `notable`, `warn`, `risk` (`warning` is accepted for `warn`). The report still states how many it hid |
+| `--cost` | `false` | Price the inventory and include the money-shaped findings. Same price book, same rules, and the same disclaimer as `auditor cost` |
+| `--list` | `false` | Print every registered insight, its family, and what it needs — then exit. No audit, no credentials |
+| `--max-rows int` | `0` (= 12) | Detail rows per finding in `table`/`markdown`; negative prints every row. `-o json` always carries every row |
+| `--exit-code` | `false` | Exit 1 when a finding reaches `--fail-on` |
+| `--fail-on string` | `risk` | Minimum severity that trips `--exit-code`: `info`, `notable`, `warn`, `risk` |
+| `--filter stringArray` | (none) | Derive findings from matching assets only; same syntax as `audit --filter`, repeatable (ANDed) |
+| `--price-book strings`, `--hours-per-month float` | (built-in book) | As `auditor cost`; only consulted with `--cost` |
+| `--from-snapshot string` | (live audit) | Read a saved `audit -o json` snapshot instead of running providers |
+| `--provider strings`, `--oci-*`, `--kube-*`, `--gcp-*`, `--tailscale-*`, `--netbird-*`, `--max-concurrency`, `--timeout` | | Same as `audit` |
+
+The topology graph is built from exactly the assets `--filter` kept, so an
+insight can never cite an edge to an asset the report does not list.
+
+### Every finding names what it cannot know
+
+This is the contract, not a disclaimer. An inventory is a list of what exists;
+it is not a record of what happens. It cannot see consumption, cannot see
+traffic, and cannot see intent. So each finding carries a **basis** (concretely
+what was joined — the asset types, the tags, the edge kinds) and a **cannot
+know** (what that join does not settle), and both print *above* the resources
+you are about to act on rather than under them. A caveat printed after the
+thing it qualifies is a footnote.
+
+The framework enforces it at three points: at registration, at publication (a
+finding whose caveat is empty, a placeholder, or a single word is **not
+published** — it lands in a loud `REFUSED` section as a bug in the insight),
+and in a test that runs every registered insight over a fixture.
+
+Three ways of producing nothing are kept apart, and the report shows all three:
+
+- **No findings** — looked, found nothing. Explicitly *not* a clean bill of
+  health; the report says so in its own words.
+- **`NOT RUN`** — the insight could not look, with the reason and the flag or
+  provider that would fix it. "Nothing found" and "never looked" must not look
+  alike, so an unmet precondition is never rendered as an empty section.
+- **`REFUSED`** — a finding was produced and rejected. A bug in the insight,
+  not a property of your estate.
+
+### Severity ranks the question, not the resource
+
+| Severity  | Means |
+| --------- | ----- |
+| `info`    | Describes the estate. Orientation, nothing to do |
+| `notable` | A pattern worth knowing about that may well be deliberate |
+| `warn`    | Probably unintended, and cheap to check |
+| `risk`    | Exact evidence, and an incident-shaped consequence. Deliberately rare |
+
+`--exit-code` gates on `risk` by default for that reason: the other three
+severities are explicitly questions, and a pipeline that fails on a question
+teaches the team to stop reading the caveats — which is the one thing this
+feature exists to make them do.
+
+Findings are ordered **family, then id — never by severity**, so two reports
+over two inventories diff against each other instead of reshuffling as the
+estate changes. Severity is marked on every line instead (a glyph *and* the
+spelled-out word; nothing here emits ANSI). Ids are stable public keys: they
+are what a CI allowlist pins and what two reports are diffed on.
+
+### `GET` / `POST /api/v1/insights`
+
+The same two-verb shape as `/api/v1/topology` and `/api/v1/reach`. `GET` runs a
+fresh raw-bearing audit; `POST` derives the same report from assets in the
+request body (a bare JSON array or `{"assets": [...]}`, 128 MiB cap), which is
+what the web UI calls so it does not re-run every provider over an inventory it
+already holds.
+
+| Query param | Both verbs | Notes |
+| ----------- | ---------- | ----- |
+| `only` | ✓ | Comma-separated globs on insight id **and** family; repeatable |
+| `severity` | ✓ | Drop findings below this severity |
+| `max_rows` | ✓ | Detail rows per finding in the human formats (`0` = 12, negative = all) |
+| `format` | ✓ | `json` (default, inline) \| `table` \| `markdown` (both returned as downloads) |
+| `providers`, `timeout`, `kube_contexts` | GET only | As every other audit-backed endpoint |
+
+The JSON response carries `disclaimer`, `scope`, `findings`, `skipped`,
+`suppressed`, `hidden` and `complete` as top-level fields, plus the usual
+`init_errors` / `errors`. `disclaimer` is required rather than optional so that
+dropping it is a deliberate act — findings shown without it read as
+measurements.
+
+Cost-bearing insights need a price book, which is a **startup** decision here
+(`serve --cost`), not a per-request one: a bad book should stop the server
+coming up rather than produce reports that are silently uncosted. Without it
+those insights come back under `skipped` saying so.
+
+`POST` bodies only carry `raw` if the *server* was started with
+`--include-raw`; without it the raw-reading insights report themselves as
+skipped. Use `GET`, which forces raw on, when completeness matters.
+
+---
+
 ## `auditor serve`
 
 Run the embedded web UI + JSON/SSE API.
@@ -641,7 +769,8 @@ The one exception is *which* cluster the Kubernetes provider scans:
   (`{"contexts": [...], "current": "..."}`; empty when there's no kubeconfig or
   the server runs in-cluster). The web UI uses it to render a "Kube contexts"
   picker on the Assets tab.
-- `/api/v1/audit`, `/api/v1/audit/export`, and `/api/v1/topology` accept a
+- `/api/v1/audit`, `/api/v1/audit/export`, `/api/v1/topology`, `/api/v1/reach`
+  and `/api/v1/insights` accept a
   `kube_contexts=ctx-a,ctx-b` (or `all`) query parameter. Each name is
   validated against that same kubeconfig — unknown names are dropped and
   reported via an `init_error` SSE event / the `X-Auditor-Init-Errors` response

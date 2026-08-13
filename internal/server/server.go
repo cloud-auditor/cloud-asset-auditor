@@ -198,6 +198,8 @@ func (s *Server) routes() {
 	s.handleFunc("POST /api/v1/topology", s.handleTopologyBuild)
 	s.handleFunc("GET /api/v1/reach", s.handleReach)
 	s.handleFunc("POST /api/v1/reach", s.handleReachBuild)
+	s.handleFunc("GET /api/v1/insights", s.handleInsights)
+	s.handleFunc("POST /api/v1/insights", s.handleInsightsBuild)
 }
 
 // handleOpenAPI serves the embedded OpenAPI 3.1 spec verbatim. Spec

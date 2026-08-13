@@ -34,11 +34,62 @@ func newIndex(assets []core.Asset) *index {
 	return idx
 }
 
-// indexNetwork extracts IPs and hostnames from each asset and adds them
-// to the per-key buckets. The extraction is provider/type-aware because
-// "where is the IP" lives in different places per resource type — the
-// universal Asset shape doesn't have a dedicated IPs field.
+// indexNetwork buckets one asset under every address and name it relates to.
+//
+// The held/targeted split AssetAddresses draws is deliberately flattened here:
+// the index answers "which assets does this key touch", and dnsToTarget is the
+// resolver that puts the direction back in.
 func (idx *index) indexNetwork(a core.Asset) {
+	ad := AssetAddresses(a)
+	for _, ip := range ad.IPs {
+		idx.byIP[ip] = append(idx.byIP[ip], a)
+	}
+	for _, ip := range ad.TargetIPs {
+		idx.byIP[ip] = append(idx.byIP[ip], a)
+	}
+	for _, host := range ad.Hostnames {
+		idx.byHostname[host] = append(idx.byHostname[host], a)
+	}
+	for _, host := range ad.TargetHostnames {
+		idx.byHostname[host] = append(idx.byHostname[host], a)
+	}
+}
+
+// Addresses is the network identity of one asset: the addresses and names it
+// answers on, and — for a DNS record — the ones it points at.
+//
+// The two halves are separate because they are different claims. An IP under
+// IPs is one this asset answers on; a TargetIP is a record's assertion about
+// somebody *else's* address, and a consumer asking "what does this estate
+// publish" that counted the two together would report every A record aimed at
+// a third-party CDN as an endpoint of this inventory.
+type Addresses struct {
+	// IPs are IP literals this asset answers on.
+	IPs []string
+	// Hostnames are names this asset owns, normalized (lower-cased, trailing
+	// dot stripped).
+	Hostnames []string
+	// TargetIPs is the content of an A/AAAA record — an address elsewhere.
+	TargetIPs []string
+	// TargetHostnames is the content of a CNAME, normalized.
+	TargetHostnames []string
+}
+
+// AssetAddresses extracts the IPs and hostnames an asset relates to. The
+// extraction is provider/type-aware because "where is the IP" lives in
+// different places per resource type — the universal Asset shape doesn't have
+// a dedicated IPs field.
+//
+// Exported because it is this project's one address parser, and internal/insight
+// reports on the estate's address surface: a second parser there would drift,
+// and the report and the graph would then disagree about what the estate
+// exposes. What it does *not* extract is equally deliberate — every source
+// added here mints new edges — so a consumer needing an address the graph does
+// not join on (a NAT gateway's nat_ip, a pod's status.podIP) supplements this
+// on its own side rather than widening it.
+func AssetAddresses(a core.Asset) Addresses {
+	var ad Addresses
+
 	switch a.Type {
 
 	case "cloudflare.dns_record":
@@ -47,17 +98,17 @@ func (idx *index) indexNetwork(a core.Asset) {
 		// Name as a hostname (so a record pointing AT example.com still
 		// looks up correctly via the hostname index).
 		if a.Name != "" {
-			idx.byHostname[normalizeHost(a.Name)] = append(idx.byHostname[normalizeHost(a.Name)], a)
+			ad.Hostnames = append(ad.Hostnames, normalizeHost(a.Name))
 		}
 		content := a.Tags["content"]
 		switch a.Tags["type"] {
 		case "A", "AAAA":
 			if content != "" {
-				idx.byIP[content] = append(idx.byIP[content], a)
+				ad.TargetIPs = append(ad.TargetIPs, content)
 			}
 		case "CNAME":
 			if content != "" {
-				idx.byHostname[normalizeHost(content)] = append(idx.byHostname[normalizeHost(content)], a)
+				ad.TargetHostnames = append(ad.TargetHostnames, normalizeHost(content))
 			}
 		}
 
@@ -66,9 +117,7 @@ func (idx *index) indexNetwork(a core.Asset) {
 		// internal/providers/oci/load_balancer.go::joinIPAddresses, which
 		// produces this format precisely so the topology resolver can
 		// index by IP without parsing the Raw payload.
-		for _, ip := range splitAddresses(a.Tags["ip_addresses"]) {
-			idx.byIP[ip] = append(idx.byIP[ip], a)
-		}
+		ad.IPs = append(ad.IPs, splitAddresses(a.Tags["ip_addresses"])...)
 
 	case "netbird.peer", "tailscale.device", "tailscale.acl_host":
 		// The mesh-VPN providers always carry a node's addresses as tags (no
@@ -83,12 +132,12 @@ func (idx *index) indexNetwork(a core.Asset) {
 		// and skipped.
 		for _, key := range []string{"ip", "ipv6", "connection_ip"} {
 			if ip := a.Tags[key]; ip != "" {
-				idx.byIP[ip] = append(idx.byIP[ip], a)
+				ad.IPs = append(ad.IPs, ip)
 			}
 		}
 		for _, key := range []string{"dns_label", "dns_name", "hostname"} {
 			if host := a.Tags[key]; host != "" {
-				idx.byHostname[normalizeHost(host)] = append(idx.byHostname[normalizeHost(host)], a)
+				ad.Hostnames = append(ad.Hostnames, normalizeHost(host))
 			}
 		}
 
@@ -98,27 +147,24 @@ func (idx *index) indexNetwork(a core.Asset) {
 			// returns hundreds of asset types and any of them may publish an
 			// address; the GCP provider flattens whichever it found into the
 			// same ip_addresses tag OCI uses (see gcp/mapping.go).
-			for _, ip := range splitAddresses(a.Tags["ip_addresses"]) {
-				idx.byIP[ip] = append(idx.byIP[ip], a)
-			}
-			return
+			ad.IPs = append(ad.IPs, splitAddresses(a.Tags["ip_addresses"])...)
+			return ad
 		}
 
 		// Kubernetes Services + Ingresses expose external IPs in Raw —
-		// they're indexed lazily below if --include-raw fed us the payload.
+		// they're read lazily below if --include-raw fed us the payload.
 		if a.Provider != "kubernetes" || len(a.Raw) == 0 {
-			return
+			return ad
 		}
-		for _, ip := range kubeExternalIPs(a.Raw) {
-			idx.byIP[ip] = append(idx.byIP[ip], a)
-		}
+		ad.IPs = append(ad.IPs, kubeExternalIPs(a.Raw)...)
 		for _, host := range kubeExternalHosts(a.Raw) {
-			idx.byHostname[normalizeHost(host)] = append(idx.byHostname[normalizeHost(host)], a)
+			ad.Hostnames = append(ad.Hostnames, normalizeHost(host))
 		}
 		for _, host := range kubeIngressHosts(a.Raw) {
-			idx.byHostname[normalizeHost(host)] = append(idx.byHostname[normalizeHost(host)], a)
+			ad.Hostnames = append(ad.Hostnames, normalizeHost(host))
 		}
 	}
+	return ad
 }
 
 // kubeExternalHosts reads Service.status.loadBalancer.ingress[*].hostname —

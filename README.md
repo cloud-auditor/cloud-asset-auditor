@@ -4,8 +4,9 @@ Single-binary CLI + web UI that inventories cloud assets across OCI,
 Cloudflare, Kubernetes, GCP, NetBird, and Tailscale into one canonical schema —
 JSON, CSV, Excel (XLSX), or a self-contained HTML report — with inferred
 network **and traffic-flow** topology graphs at high or low level, an
-interactive in-browser diagram, live dashboards, and snapshot drift detection
-(`auditor diff`).
+interactive in-browser diagram, live dashboards, snapshot drift detection
+(`auditor diff`), and derived findings that each name what they cannot know
+(`auditor insights`).
 
 > **All phases shipped.** Foundation, JSON / CSV / XLSX renderers, CLI, three
 > providers (Cloudflare zones+DNS / OCI all resource types /
@@ -514,6 +515,73 @@ auditor cache prune --keep 30 --dry-run             # preview, delete nothing
 auditor audit --cache --cache-retain 30             # standing policy, per provider set
 auditor audit --cache --cache-retain-age 2160h      # or: nothing older than 90 days
 ```
+
+## Insights
+
+`auditor insights` reports what stands out in an inventory you have already
+collected — what is reachable from outside, how the network is arranged, what
+carries no owner, what expires soon, where the money is. It is not a collector:
+every number comes from assets the audit already holds plus the topology graph
+it already infers, so it costs no extra provider API calls and runs just as
+well against a six-month-old snapshot.
+
+```bash
+auditor insights                                # live audit, table report
+auditor insights --demo                         # synthetic estate, no credentials
+auditor insights --list                         # every question this binary asks
+auditor insights --only exposure,network
+auditor insights --only 'hygiene.*' --severity warn
+auditor insights --cost                         # include the money-shaped findings
+auditor insights --from-snapshot assets.json -o json | jq '.findings[].caveat'
+auditor insights -o markdown >> "$GITHUB_STEP_SUMMARY"
+```
+
+### Every finding says what it cannot know
+
+That is the feature, not the disclaimer. An inventory is a list of what
+exists; it is not a record of what happens. It cannot see consumption, it
+cannot see traffic, and it cannot see intent — and those three absences sit
+behind almost everything you would want an insight to tell you. So each finding
+carries a **basis** (concretely what was joined) and a **cannot know** (what
+that join does not settle), and both are printed *above* the list of resources
+you are about to go and act on:
+
+```
+  *  notable Egress gateways in networks with nothing recorded behind them . 5
+     5 egress gateways sit in 3 networks where this inventory records no
+     resource at all.
+
+     basis        NAT, internet and service gateways whose vcn_id names a
+                  network that no collected asset references — matched by
+                  scanning every other asset's tag values for the VCN's OCID
+                  or one of its subnets' OCIDs.
+     cannot know  This inference is weak and its blind spot is the common
+                  case: OCI compute instances record no VCN or subnet in this
+                  inventory, so a network full of instances looks empty to
+                  this test. [...]
+```
+
+The framework refuses to publish a finding that arrives without one — it lands
+in a loud `REFUSED` section as a bug in the insight rather than being quietly
+dropped. Findings are ordered by family then id, never by severity, so two
+reports diff against each other instead of reshuffling as the estate changes.
+
+**Finding nothing is a normal result and is not a clean bill of health**, and
+the report says so itself. An insight that could not run at all — no raw
+payloads, no cost estimates, the owning provider absent from the audit — is
+listed under `NOT RUN` with the reason, because "nothing found" and "never
+looked" must not look alike.
+
+Severity ranks the *question*, not the resource: `info` describes the estate,
+`notable` may well be deliberate, `warn` is probably unintended and cheap to
+check, and `risk` is reserved for exact evidence with an incident-shaped
+consequence. `--exit-code` therefore gates on `risk` by default — a pipeline
+that fails on a question teaches the team to stop reading the caveats.
+
+Over the API, `GET /api/v1/insights` runs a fresh audit and `POST
+/api/v1/insights` derives the same report from assets you already hold (the
+two-verb shape `/topology` and `/reach` use). Full flag surface in
+[`docs/configuration.md`](./docs/configuration.md#auditor-insights).
 
 ## Cost estimation
 

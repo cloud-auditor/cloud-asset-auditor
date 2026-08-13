@@ -30,6 +30,10 @@ tags:
     description: Asset inventory collection
   - name: topology
     description: Derived request-path graph between assets
+  - name: insights
+    description: >
+      Findings derived from a collected inventory. Nothing here is measured —
+      every finding carries a basis and a caveat naming what it cannot know.
 
 paths:
   /healthz:
@@ -530,6 +534,118 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /api/v1/insights:
+    get:
+      tags: [insights]
+      summary: Derived findings (fresh audit)
+      description: |
+        Runs a fresh audit with raw payloads, builds the topology graph, and
+        evaluates every registered insight over both.
+
+        This endpoint collects nothing of its own. Every number comes from
+        assets the audit already holds plus the graph inferred from them, so
+        the same report can be produced from a six-month-old snapshot via the
+        POST form.
+
+        **Read the caveats.** Each finding carries a `basis` (concretely what
+        was joined) and a `caveat` (what that join cannot settle), and both are
+        required fields — an inventory cannot see consumption, cannot see
+        traffic, and cannot see intent. `disclaimer` on the response says the
+        same thing at report level and is also required. A consumer that
+        renders findings without them is presenting questions as verdicts.
+
+        Three ways of producing nothing are kept apart and all three are in the
+        response: `findings` empty (looked, found nothing — *not* a clean bill
+        of health), `skipped` (an insight could not run, with the reason), and
+        `suppressed` (a finding this server refused to publish because it did
+        not carry a caveat, which is a bug in the insight).
+
+        Cost-bearing insights need a price book, which is a startup decision
+        (`serve --cost`). Without it they appear under `skipped`.
+      parameters:
+        - $ref: "#/components/parameters/ProvidersParam"
+        - $ref: "#/components/parameters/TimeoutParam"
+        - $ref: "#/components/parameters/KubeContextsParam"
+        - $ref: "#/components/parameters/InsightOnlyParam"
+        - $ref: "#/components/parameters/InsightSeverityParam"
+        - $ref: "#/components/parameters/InsightMaxRowsParam"
+        - $ref: "#/components/parameters/InsightFormatParam"
+      responses:
+        "200":
+          description: The report, or a rendered version of it as a download
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InsightReport"
+            text/plain:
+              schema:
+                type: string
+            text/markdown:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      tags: [insights]
+      summary: Derived findings (from supplied assets)
+      description: |
+        Same analysis as the GET form, over assets supplied in the request body
+        instead of a fresh audit. This is what the web UI calls: the Assets view
+        already holds the streamed inventory, so re-running every provider to
+        derive findings about it would waste API quota.
+
+        Note the body only carries `raw` if the *server* was started with
+        `--include-raw`. Without it, every insight that reads a resource's own
+        document (Kubernetes specs, policy bodies, certificate details) reports
+        itself under `skipped` rather than returning an empty section — which is
+        the honest answer, but a thinner report. Use the GET form, which forces
+        raw on, when completeness matters.
+      parameters:
+        - $ref: "#/components/parameters/InsightOnlyParam"
+        - $ref: "#/components/parameters/InsightSeverityParam"
+        - $ref: "#/components/parameters/InsightMaxRowsParam"
+        - $ref: "#/components/parameters/InsightFormatParam"
+      requestBody:
+        required: true
+        description: |
+          Either a bare JSON array of assets or an `{"assets": [...]}`
+          envelope. Bodies above 128 MiB are rejected.
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: array
+                  items:
+                    $ref: "#/components/schemas/Asset"
+                - type: object
+                  properties:
+                    assets:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/Asset"
+      responses:
+        "200":
+          description: The report, or a rendered version of it as a download
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InsightReport"
+            text/plain:
+              schema:
+                type: string
+            text/markdown:
+              schema:
+                type: string
+        "400":
+          description: Undecodable body, or an unknown `format` / `severity`
+        "413":
+          description: Request body above the 128 MiB cap
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
 components:
   parameters:
     ProvidersParam:
@@ -637,6 +753,49 @@ components:
       schema:
         type: boolean
         default: false
+    InsightOnlyParam:
+      name: only
+      in: query
+      description: >
+        Comma-separated case-insensitive globs, matched against each insight's
+        id AND family — `exposure`, `hygiene.*` and `*cert*` all work. Repeat
+        the parameter or comma-join; both mean the same thing. Empty runs every
+        registered insight.
+      schema:
+        type: string
+        example: exposure,hygiene.*
+    InsightSeverityParam:
+      name: severity
+      in: query
+      description: >
+        Drop findings below this severity. `warning` is accepted as an alias for
+        `warn`. What was dropped is reported in the response's `hidden` count —
+        a filter that hid its own effect would turn a quiet report into a false
+        one.
+      schema:
+        type: string
+        enum: [info, notable, warn, risk]
+    InsightMaxRowsParam:
+      name: max_rows
+      in: query
+      description: >
+        Detail rows printed per finding in the `table` and `markdown` formats.
+        `0` means the default of 12; a negative value prints every row. Ignored
+        by `format=json`, which always carries every row.
+      schema:
+        type: integer
+        default: 0
+    InsightFormatParam:
+      name: format
+      in: query
+      description: >
+        Response format. `json` returns the structured report inline; `table`
+        and `markdown` render the human report and return it as a file
+        attachment.
+      schema:
+        type: string
+        enum: [json, table, markdown]
+        default: json
 
   responses:
     Unauthorized:
@@ -815,3 +974,201 @@ components:
           type: array
           items:
             type: string
+
+    InsightReport:
+      type: object
+      description: >
+        A whole insights run. `disclaimer` is required rather than optional so
+        that dropping it is a deliberate act: a shareable artifact travels
+        without its author, and findings shown without the statement of what
+        they are read as measurements.
+      required: [generated_at, disclaimer, scope, findings, complete]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        disclaimer:
+          type: string
+          description: What an insight is and is not. Render it above the findings, never below.
+        scope:
+          $ref: "#/components/schemas/InsightScope"
+        findings:
+          type: array
+          description: >
+            Ordered by family then id — deliberately NOT by severity, so two
+            reports over two inventories diff against each other instead of
+            re-ordering as the estate changes. Severity is marked on every
+            finding instead.
+          items:
+            $ref: "#/components/schemas/InsightFinding"
+        skipped:
+          type: array
+          description: >
+            Insights that did not run because their preconditions were unmet,
+            each with the reason. Present so an empty section is never mistaken
+            for a clean one — "nothing found" and "never looked" are different
+            answers.
+          items:
+            type: object
+            required: [insight, reason]
+            properties:
+              insight: { type: string }
+              title: { type: string }
+              family: { type: string }
+              reason:
+                type: string
+                example: no asset in this audit carries a Raw payload — re-run with --include-raw
+        suppressed:
+          type: array
+          description: >
+            Findings the server produced but refused to publish, because they
+            did not carry the required basis and caveat. A non-empty list is a
+            bug in an insight, not a property of the estate; render it loudly.
+          items:
+            type: object
+            required: [insight, reason]
+            properties:
+              insight: { type: string }
+              finding: { type: string }
+              title: { type: string }
+              reason: { type: string }
+        hidden:
+          type: integer
+          description: Findings dropped by the `severity` filter.
+        complete:
+          type: boolean
+          description: False when the run was cancelled part-way; the report is then partial and says so.
+        notes:
+          type: array
+          description: >
+            Run-level caveats derived from the scope — a single-provider audit,
+            an audit with no raw payloads, an empty result. They qualify
+            everything below them, so render them under the disclaimer rather
+            than at the bottom.
+          items:
+            type: string
+        init_errors:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: string
+
+    InsightScope:
+      type: object
+      description: What the run had to work with. Every field here is a plausible explanation for a report being empty, large or surprising.
+      properties:
+        assets: { type: integer }
+        types: { type: integer }
+        providers:
+          type: array
+          items: { type: string }
+        edges:
+          type: integer
+          description: Inferred topology edges available to the insights.
+        raw_assets:
+          type: integer
+          description: How many assets carried an `Asset.Raw` payload. Zero means every raw-reading insight was inert.
+        priced:
+          type: boolean
+          description: Whether a cost estimator was available (`serve --cost`).
+
+    InsightFinding:
+      type: object
+      description: >
+        One derived answer. `basis` and `caveat` are both required and are part
+        of the finding, not a footnote: a finding with a basis and no caveat
+        states more than it knows, and one with a caveat and no basis is
+        unfalsifiable.
+      required: [id, family, title, summary, severity, count, basis, caveat]
+      properties:
+        id:
+          type: string
+          description: Stable slug — a public key. It is what a CI gate allowlists and what two reports are diffed on, so it does not change.
+          example: network.public-addresses
+        family:
+          type: string
+          description: >
+            Section slug. `exposure`, `access`, `network`, `resilience`, `cost`
+            and `hygiene` lead the report in that order; any other slug is
+            legal and sorts alphabetically after them.
+          example: network
+        title: { type: string }
+        summary:
+          type: string
+          description: One line carrying the number, phrased as an observation rather than a verdict, written to survive being quoted on its own.
+        severity:
+          type: string
+          enum: [info, notable, warn, risk]
+          description: >
+            How much attention the question deserves, not how bad the resource
+            is. `risk` is reserved for exact evidence with an incident-shaped
+            consequence and is deliberately rare.
+        count:
+          type: integer
+          description: The magnitude the summary quotes. Need not equal the number of rows — rows are frequently a sample.
+        basis:
+          type: string
+          description: Concretely what was joined — asset types, tags, edge kinds — reproducible by a reader.
+          example: every asset carrying an ip_addresses tag, parsed and tested against RFC 1918 / RFC 6598 ranges
+        caveat:
+          type: string
+          description: What this finding cannot know. Required, and enforced — a finding without one is not published.
+          example: an inventory records that the address is routable, not that anything is listening on it or that a firewall does not already block it
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/InsightRow"
+        total:
+          $ref: "#/components/schemas/Money"
+
+    InsightRow:
+      type: object
+      description: One line of a finding's detail table.
+      required: [label]
+      properties:
+        label:
+          type: string
+          description: What the row is about; always present.
+        asset:
+          $ref: "#/components/schemas/AssetRef"
+        fact:
+          type: string
+          description: The checkable observation for this row, in the row's own terms.
+          example: requests 8 CPU, limit unset
+        value:
+          type: string
+          description: A measure, rendered right-aligned. A string, not a number, so a row can say `unknown` where it must.
+        money:
+          $ref: "#/components/schemas/Money"
+        related:
+          type: array
+          description: Other assets implicated in the row — the zone a record belongs to, the rule that permits the flow.
+          items:
+            $ref: "#/components/schemas/AssetRef"
+
+    Money:
+      type: object
+      description: >
+        A cost figure, split by whether it was measured from a billing API or
+        estimated from list price. Amounts are strings, never numbers, so a
+        consumer that wants to add them up has to notice the `~` first. An
+        empty aggregate renders as `—`, never as `0.00`.
+      required: [currency, display]
+      properties:
+        currency:
+          type: string
+          example: USD
+        measured:
+          type: string
+          description: Present only when non-zero. Came from the provider's own billing API.
+          example: "412.90"
+        estimated:
+          type: string
+          description: Present only when non-zero. Computed from a list-price book; always carries the leading `~`.
+          example: "~8.50"
+        display:
+          type: string
+          description: The rendered pair, e.g. `$412.90 + ~$8.50`.

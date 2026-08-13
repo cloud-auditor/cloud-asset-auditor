@@ -1,0 +1,526 @@
+/*
+ * Insights page.
+ *
+ * Page-local for the reason app/exposure/exposure.css is: none of it is
+ * reusable vocabulary yet. A finding card — a severity-railed panel whose
+ * caveat outranks its own detail table — only means anything where a *finding*
+ * is the unit of display, and FindingCard is mounted nowhere else. Promote to
+ * globals.css the moment a second surface renders one.
+ *
+ * The shared pieces — .card, .stat, .chip, .count-badge, .banner, .empty,
+ * .surface-rail — come from globals.css and are only extended here.
+ *
+ * Every new class is prefixed `ins-` or `finding-`. An imported stylesheet in
+ * the App Router is global, not scoped, so an unprefixed `.rows` here would
+ * silently restyle another page's markup.
+ */
+
+/* ---------- derive bar ---------- */
+
+.ins-run { margin-bottom: 16px; }
+.ins-run-body {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.ins-run-hint {
+  flex: 1 1 420px;
+  min-width: 0;
+  margin: 0;
+  max-width: 92ch;
+}
+
+/* ---------- summary band ---------- */
+
+.ins-band { margin-bottom: 16px; }
+.ins-band-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Tighter than the dashboard's tiles: this band sits above the content rather
+   than being the content, and four full-height tiles would push the first
+   finding off a laptop screen. */
+.ins-band .stats {
+  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  gap: 10px;
+}
+.ins-band .stat { padding: 11px 13px 12px; }
+.ins-band .stat .v { font-size: var(--fs-xl); }
+
+/* A money figure carries a measured and an estimated half and is several times
+   longer than a count. It wraps rather than truncating: a figure cut short is
+   not an unreadable figure, it is a different and smaller one, and nothing in
+   the glyphs would tell the reader that had happened. */
+.ins-money {
+  font-size: var(--fs-lg);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- scope strip ---------- */
+
+.ins-scope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+.ins-scope-label,
+.ins-filter-label {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+/* A gap in what the run could see, not a neutral fact about it — the two
+   conditions that most often explain a short list of findings. */
+.ins-scope .ins-gap {
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+/* ---------- filters ---------- */
+
+.ins-filters {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.ins-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+/* The chips carry their own colour inline (severity) and .chip.on would repaint
+   the border accent-coloured underneath it. */
+.ins-filter-group .chip { text-transform: capitalize; }
+.ins-filter-group .chip .count-badge { margin-right: -3px; }
+
+/* ---------- the band's own caveat ---------- */
+
+/* Not a footnote: this is the band restating that its large numbers are
+   quotations, and it is the only thing standing between a summary tile and a
+   claim the tool cannot support.
+
+   The rule lives on the wrapper, not on the paragraph. A border-top on an
+   element that also caps its own measure stops where the text stops, which
+   draws a line that quits two-thirds of the way across and reads as a
+   rendering fault rather than as a divider. */
+.ins-band-foot {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.ins-band-caveat {
+  margin: 0;
+  max-width: 108ch;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+.ins-band-caveat strong { color: var(--text); font-weight: 600; }
+
+/* ---------- standing panels ---------- */
+
+.ins-disclaimer,
+.ins-notes,
+.ins-skipped,
+.ins-suppressed {
+  margin-bottom: 16px;
+}
+.ins-disclaimer .card-body,
+.ins-notes .card-body,
+.ins-skipped .card-body,
+.ins-suppressed .card-body {
+  padding-left: 19px;
+}
+
+/* A refusal is a defect report, not a note about the estate — it is the one
+   panel here that should look wrong. */
+.ins-suppressed .ins-panel-title { color: var(--danger); }
+.ins-suppressed .ins-panel-title svg { flex: none; }
+.ins-disclaimer p {
+  margin: 0;
+  max-width: 100ch;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.ins-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 8px;
+  font-size: var(--fs-base);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.ins-notes ul {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+  max-width: 100ch;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.ins-skipped .hint,
+.ins-suppressed .hint { margin: 0 0 10px; max-width: 92ch; }
+.ins-skipped-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ins-skipped-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+.ins-skipped-list code {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- family sections ---------- */
+
+.ins-family { margin-bottom: 22px; }
+.ins-family-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+}
+.ins-family-head h2 {
+  margin: 0;
+  font-size: var(--fs-md);
+  /* Sentence case in the DOM, upper-cased here — a screen reader handed
+     "EXPOSURE" may spell it out. */
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.ins-family-help {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+.ins-family-head .spacer { flex: 1; }
+
+.ins-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---------- finding card ---------- */
+
+.finding { transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.finding:hover { border-color: var(--border-strong); box-shadow: var(--shadow-2); }
+.finding-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 19px;
+}
+
+.finding-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.finding-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.3;
+}
+.finding-head .spacer { flex: 1; }
+
+/* Colour comes in inline as `color`, so fill and border derive from it and a
+   severity is defined in exactly one place. */
+.finding-sev {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.finding-id {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+.finding-summary {
+  margin: 0;
+  max-width: 96ch;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+
+.finding-total {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.finding-total-figure {
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+/* ---------- basis + caveat ---------- */
+
+.finding-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.finding-basis,
+.finding-caveat {
+  margin: 0;
+  max-width: 104ch;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+/* The label is a lead-in, not a heading: it sits on the same line as the
+   sentence so the pair reads as one statement. */
+.finding-label {
+  display: inline;
+  margin-right: 8px;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* The caveat is deliberately the loudest thing in this block. It is what keeps
+   the finding above it from reading as an accusation, so it gets the warn hue,
+   a rule of its own, and full-strength text — a caveat set in the same grey as
+   the basis is a caveat that gets skimmed. */
+.finding-caveat {
+  padding-left: 11px;
+  border-left: 2px solid var(--warn);
+  color: var(--text);
+}
+.finding-caveat .finding-label { color: var(--warn); }
+
+/* A finding that arrived without one is a producer bug. Shown, not hidden. */
+.finding-caveat.missing {
+  border-left-color: var(--danger);
+  color: var(--danger);
+}
+.finding-caveat.missing .finding-label { color: var(--danger); }
+
+/* ---------- detail rows ---------- */
+
+.finding-rows {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.finding-rows table { font-size: var(--fs-sm); }
+.finding-rows thead th {
+  position: static;
+  background: var(--bg-elev);
+  cursor: default;
+  font-size: var(--fs-micro);
+}
+.finding-rows thead th:hover { color: var(--text-dim); }
+/* The wrapper draws the bottom edge; a last row keeping its own would double it. */
+.finding-rows tbody tr:last-child td { border-bottom: 0; }
+.finding-rows .num { text-align: right; white-space: nowrap; }
+
+.finding-subject { max-width: 420px; }
+.finding-fact {
+  color: var(--text-dim);
+  max-width: 520px;
+  word-break: break-word;
+  white-space: normal;
+}
+
+.finding-name,
+.finding-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 550;
+}
+/* Scoped to the anchor: an aggregate row ("namespace prod") renders the same
+   class on a <span>, and a hover highlight there would promise a link that is
+   not coming. */
+a.finding-name:hover { color: var(--accent); text-decoration: none; }
+.finding-name svg,
+.finding-ref svg { flex: none; color: var(--text-faint); }
+.finding-name .dot,
+.finding-ref .dot { flex: none; }
+
+.finding-related {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+}
+.finding-ref {
+  padding: 0 6px 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  max-width: 220px;
+}
+a.finding-ref:hover { border-color: var(--border-strong); color: var(--text); text-decoration: none; }
+.finding-ref.static { cursor: default; }
+
+.finding-more {
+  display: flex;
+  justify-content: center;
+  padding: 7px;
+  border-top: 1px solid var(--border);
+}
+/* No max-width: the rule above it is what separates the note from the table,
+   and a capped measure would stop the rule short of the card edge. */
+.finding-rowsnote {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- empty report ---------- */
+
+/* Weighted like a finding, not like an empty state: an operator who reads "no
+   findings" as "nothing wrong" has been misled, so this gets a rail, a heading
+   and room to breathe — the same treatment app/exposure gives its zero result,
+   and for the same reason. */
+.ins-empty { margin-bottom: 16px; }
+.ins-empty .card-body { padding-left: 19px; }
+
+.ins-empty-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--warn);
+}
+.ins-empty-head h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  color: var(--text);
+}
+.ins-empty-head svg { flex: none; }
+
+.ins-empty p {
+  margin: 0 0 12px;
+  max-width: 86ch;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.ins-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 0;
+  max-width: 92ch;
+  list-style: none;
+}
+.ins-reasons li {
+  position: relative;
+  padding-left: 19px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+.ins-reasons li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warn);
+  opacity: 0.7;
+}
+.ins-reasons strong { color: var(--text); font-weight: 600; }
+.ins-reasons code,
+.ins-empty p code {
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+
+/* max-width: none overrides `.ins-empty p` — this one carries a rule, and a
+   capped measure would cut the rule off mid-card. */
+.ins-empty-foot {
+  margin: 0;
+  padding-top: 10px;
+  max-width: none;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 720px) {
+  /* One per row rather than a tighter auto-fit: two 140px columns is not enough
+     for a money figure, and this band's job is to be readable, not dense. */
+  .ins-band .stats { grid-template-columns: 1fr; }
+  .ins-family-help { flex-basis: 100%; }
+  .finding-subject,
+  .finding-fact { max-width: none; }
+  .ins-empty p,
+  .ins-reasons,
+  .ins-band-caveat { max-width: none; }
+  /* The detail table is the one thing here that cannot reflow: it scrolls
+     inside its own box rather than making the page scroll sideways. */
+  .finding-rows { overflow-x: auto; }
+}

@@ -8,11 +8,17 @@ import { ThemeToggle } from './ThemeToggle';
 import { fetchProviders } from '@/lib/api';
 import { fmtCount } from '@/lib/format';
 
+// Ordered by how far each page is from the raw data: the shape of the
+// inventory, the inventory itself, the graph inferred from it, a question asked
+// of that graph, and the findings derived from all of it. Insights is last
+// because it is the most derived — and the most in need of everything above it
+// having been read first.
 const LINKS = [
   { href: '/', label: 'Dashboard' },
   { href: '/assets/', label: 'Assets' },
   { href: '/topology/', label: 'Topology' },
   { href: '/exposure/', label: 'Exposure' },
+  { href: '/insights/', label: 'Insights' },
 ];
 
 /** Trailing slashes come from next.config's `trailingSlash: true`; compare

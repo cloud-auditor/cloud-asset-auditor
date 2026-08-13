@@ -57,12 +57,18 @@ const (
 )
 
 // OCI tenancy + compartment OCIDs. The compartment tree is
-// root → platform → {prod, staging}.
+// root → platform → {prod, staging, dr}.
 const (
 	ociTenancy         = "ocid1.tenancy.oc1..aaaaaaaanorthwindroot0001"
 	ociCompartmentPlat = "ocid1.compartment.oc1..aaaaaaaanwplatform0001"
 	ociCompartmentProd = "ocid1.compartment.oc1..aaaaaaaanwprod00000001"
 	ociCompartmentStg  = "ocid1.compartment.oc1..aaaaaaaanwstaging00001"
+	// The DR compartment holds a VCN, a subnet and a NAT gateway and nothing
+	// else. Compartment membership is the strongest "what is in here" signal
+	// the OCI collectors give — instances carry compartment_id but no VNIC or
+	// subnet OCID (see internal/providers/oci/compute.go), so an empty
+	// compartment is as close as this inventory gets to an empty network.
+	ociCompartmentDR = "ocid1.compartment.oc1..aaaaaaaanwdr0000000001"
 )
 
 // Kubernetes cluster identities. The real provider uses the kube-system
@@ -81,7 +87,7 @@ const (
 // Assets returns the complete synthetic inventory. Every call rebuilds the
 // slice so callers can mutate what they get (Collect strips Raw in place).
 func Assets() []core.Asset {
-	out := make([]core.Asset, 0, 640)
+	out := make([]core.Asset, 0, 700)
 	out = append(out, cloudflareAssets()...)
 	out = append(out, ociAssets()...)
 	out = append(out, kubernetesAssets()...)
@@ -111,6 +117,25 @@ func mustParseTime(s string) time.Time {
 func created(offsetHours int) *time.Time {
 	t := fixtureEpoch.Add(time.Duration(offsetHours) * time.Hour)
 	return &t
+}
+
+// expiresAt renders an expiry offsetHours after the epoch in RFC3339, the
+// exact shape the Cloudflare collector writes into Tags["expires_on"]. An
+// offset of 0 yields "" so callers can pass "unknown" straight through — the
+// tags helper then drops the key, which is what the real collector does when
+// the API returns a zero time.
+//
+// The fixture's clock is frozen at fixtureEpoch, so "expires in six days"
+// means six days after *the snapshot was taken*, not six days from now. That
+// is the honest reading of any stored snapshot, and a consumer that measures
+// expiry against wall-clock time will correctly report these as long past —
+// the fix is to measure against the snapshot's own newest CreatedAt, not to
+// float the fixture off a real clock.
+func expiresAt(offsetHours int) string {
+	if offsetHours == 0 {
+		return ""
+	}
+	return fixtureEpoch.Add(time.Duration(offsetHours) * time.Hour).Format(time.RFC3339)
 }
 
 // tags builds a tag map from key/value pairs, dropping empty values so an
@@ -188,6 +213,59 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // pad renders a zero-padded ordinal for generated names/ids.
 func pad(n int) string { return fmt.Sprintf("%04d", n) }
+
+// ownerTeams are the values Northwind's tagging policy asks for in the
+// freeform "owner" tag. An email is fine in an OCI freeform tag, which takes
+// arbitrary strings; the GCP section uses bare team names because label values
+// there cannot contain an "@".
+var ownerTeams = []string{
+	"platform@northwind.example",
+	"shop@northwind.example",
+	"payments@northwind.example",
+	"data@northwind.example",
+}
+
+// ownerFor assigns an owner round-robin and returns "" for every ninth
+// resource. The gap is the point: an inventory where everything is tagged
+// cannot demonstrate a tagging gap, and one where nothing is cannot
+// distinguish a gap from a convention nobody ever adopted. Note that an
+// absent owner tag says who is *not recorded* as owning a resource, which is
+// not the same as it being unowned — the person who made it by hand at 2am
+// knows perfectly well that it is theirs.
+func ownerFor(seq int) string {
+	if seq%9 == 4 {
+		return ""
+	}
+	return ownerTeams[seq%len(ownerTeams)]
+}
+
+// envOf maps an OCI compartment to the env tag the policy asks for. Kept in
+// one place so a compartment can't be "prod" in one section and "production"
+// in another — a fixture that disagreed with itself would make any grouping
+// by env look broken in a way real tenancies usually aren't.
+func envOf(compartment string) string {
+	switch compartment {
+	case ociCompartmentProd:
+		return "prod"
+	case ociCompartmentStg:
+		return "staging"
+	case ociCompartmentPlat:
+		return "platform"
+	case ociCompartmentDR:
+		return "dr"
+	}
+	return ""
+}
+
+// ownerEnv returns the owner/env pair for one resource, keeping the two
+// consistent: a resource created outside the module that stamps the tags
+// carries none of them, not some of them.
+func ownerEnv(seq int, compartment string) (owner, env string) {
+	if owner = ownerFor(seq); owner == "" {
+		return "", ""
+	}
+	return owner, envOf(compartment)
+}
 
 // ----------------------------------------------------------------------
 // Cloudflare
@@ -269,6 +347,18 @@ func cfAnchorDNS() []cfDNSRecord {
 		{z2, "vpn.nwlabs.dev", "A", tsBastionIP, false},                     // → Tailscale device (overlay IP)
 		{z2, "nb.nwlabs.dev", "A", nbGatewayIP, false},                      // → NetBird gateway peer (overlay IP)
 		{z2, "edge.nwlabs.dev", "A", ociStageLBIP, true},                    // → OCI staging LB
+
+		// Two records that point at nothing. They are the inverse of every
+		// anchor above: the address/hostname is inside a range Northwind
+		// demonstrably owns (203.0.113.10/.11/.12 are the three OCI load
+		// balancers; kubeStageLBHost has the same OCI LB-hostname shape), but
+		// no asset in the inventory publishes *these* two, because the load
+		// balancer each was created for is gone. The record outliving its
+		// target is the only trace left — and "no asset publishes it" is a
+		// fact about this inventory, not about DNS: a target in an account
+		// the token cannot see looks identical from here.
+		{z0, "checkout-old.northwind.example", "A", "203.0.113.13", false},
+		{z1, "beta.northwind.io", "CNAME", "nw-beta.lb.eu-frankfurt-1.oci.example", false},
 	}
 }
 
@@ -445,15 +535,22 @@ func cfSecurityAssets() []core.Asset {
 		})
 	}
 
+	// expiresHours is an offset from the fixture epoch, matching how every
+	// other timestamp here is built. Zero means "no expiry recorded", which is
+	// not a rounding of the fixture: the real certificate-pack collector emits
+	// no expires_on tag at all (see cloudflare/certificates.go — only the
+	// custom and mTLS builders set it), so a third of the certificates in any
+	// Cloudflare inventory simply cannot be checked for expiry from tags.
 	certs := []struct {
 		typ, name, zone, acct, status string
+		expiresHours                  int
 	}{
-		{"cloudflare.certificate_pack", "northwind.example", cfZoneExample, cfAccountProd, "active"},
-		{"cloudflare.certificate_pack", "northwind.io", cfZoneIO, cfAccountProd, "active"},
-		{"cloudflare.certificate_pack", "nwlabs.dev", cfZoneLabs, cfAccountLabs, "pending_validation"},
-		{"cloudflare.custom_certificate", "northwind.example (custom)", cfZoneExample, cfAccountProd, "active"},
-		{"cloudflare.mtls_certificate", "Northwind device CA", "", cfAccountProd, "active"},
-		{"cloudflare.mtls_certificate", "Partner API CA", "", cfAccountProd, "active"},
+		{"cloudflare.certificate_pack", "northwind.example", cfZoneExample, cfAccountProd, "active", 0},
+		{"cloudflare.certificate_pack", "northwind.io", cfZoneIO, cfAccountProd, "active", 0},
+		{"cloudflare.certificate_pack", "nwlabs.dev", cfZoneLabs, cfAccountLabs, "pending_validation", 0},
+		{"cloudflare.custom_certificate", "northwind.example (custom)", cfZoneExample, cfAccountProd, "active", 11 * 24},
+		{"cloudflare.mtls_certificate", "Northwind device CA", "", cfAccountProd, "active", 6 * 24},
+		{"cloudflare.mtls_certificate", "Partner API CA", "", cfAccountProd, "active", 300 * 24},
 	}
 	for i, c := range certs {
 		id := uid("cf", "cert", c.typ, c.name)
@@ -473,6 +570,7 @@ func cfSecurityAssets() []core.Asset {
 				"issuer", "DigiCert Inc",
 				"validity_days", "90",
 				"signature", "ECDSAWithSHA256",
+				"expires_on", expiresAt(c.expiresHours),
 			),
 			Raw: raw(map[string]any{"id": id, "issuer": "DigiCert Inc", "status": c.status}),
 		})
@@ -616,6 +714,7 @@ func ociCompartments() []core.Asset {
 		{ociCompartmentPlat, "northwind-platform", ociTenancy, "Shared platform services"},
 		{ociCompartmentProd, "northwind-prod", ociCompartmentPlat, "Production workloads"},
 		{ociCompartmentStg, "northwind-staging", ociCompartmentPlat, "Pre-production workloads"},
+		{ociCompartmentDR, "northwind-dr", ociCompartmentPlat, "Failover site (network only)"},
 	}
 	out := make([]core.Asset, 0, len(comps))
 	for i, c := range comps {
@@ -638,6 +737,12 @@ func ociNetwork() []core.Asset {
 			tags("compartment_id", v.compartment, "cidr_blocks", v.cidr, "dns_label", strings.ReplaceAll(v.name, "-", "")),
 			map[string]any{"id": v.id, "displayName": v.name, "cidrBlocks": []string{v.cidr}}))
 
+		// Each VCN is a /16 carved into three unequal tiers: a /26 fronting
+		// the load balancer, a /20 for workloads, a /24 for databases. The
+		// sizes differ on purpose — three identical /24s would make every
+		// VCN's address utilisation the same number, and the interesting
+		// question ("how much of the range you reserved did you carve up?")
+		// would have one answer for the whole tenancy.
 		for si, tier := range []string{"public", "app", "db"} {
 			id := fmt.Sprintf("ocid1.subnet.oc1.%s.aaaaaaaa%s%s", v.region, strings.ReplaceAll(v.name, "-", ""), tier)
 			subnetIDs = append(subnetIDs, id)
@@ -645,7 +750,7 @@ func ociNetwork() []core.Asset {
 				tags(
 					"compartment_id", v.compartment,
 					"vcn_id", v.id,
-					"cidr_block", fmt.Sprintf("10.%d.%d.0/24", 20+vi*10, si*16),
+					"cidr_block", fmt.Sprintf("10.%d.%d.0/%d", 20+vi*10, si*16, []int{26, 20, 24}[si]),
 					"prohibit_public_ip_on_vnic", strconv.FormatBool(tier != "public"),
 				),
 				map[string]any{"id": id, "vcnId": v.id, "displayName": v.name + "-" + tier}))
@@ -662,6 +767,63 @@ func ociNetwork() []core.Asset {
 				tags("compartment_id", v.compartment, "vcn_id", v.id, g.extraKey, g.extraVal),
 				map[string]any{"id": id, "vcnId": v.id}))
 		}
+	}
+
+	// Two VCNs shaped by history rather than by the loop above.
+	//
+	// nw-acq-vcn arrived with an acquisition and was imported wholesale: its
+	// range is byte-for-byte nw-prod-vcn's, so the two can never be peered or
+	// routed to each other. nw-dr-vcn was carved for a failover that never
+	// happened and covers the top half of staging's range.
+	//
+	// The overlap is computable from the cidr_blocks tags alone. What is *not*
+	// computable is whether it matters: two ranges colliding only hurts if
+	// something ever has to route between them, and an inventory sees ranges,
+	// not routing intent.
+	type extraSubnet struct{ suffix, cidr string }
+	overlapping := []struct {
+		id, name, region, compartment, cidr string
+		subnets                             []extraSubnet
+		gwType, gwSuffix, gwKey, gwVal      string
+	}{
+		{
+			"ocid1.vcn.oc1.uk-london-1.aaaaaaaanwacqvcn001", "nw-acq-vcn", "uk-london-1", ociCompartmentPlat, "10.20.0.0/16",
+			[]extraSubnet{{"app", "10.20.0.0/22"}, {"db", "10.20.4.0/24"}},
+			"oci.internet_gateway", "igw", "enabled", "true",
+		},
+		{
+			"ocid1.vcn.oc1.uk-london-1.aaaaaaaanwdrvcn0001", "nw-dr-vcn", "uk-london-1", ociCompartmentDR, "10.30.128.0/17",
+			[]extraSubnet{{"app", "10.30.128.0/24"}},
+			// The NAT gateway nothing sits behind: its VCN is alone in the
+			// northwind-dr compartment, which holds no instances, no NLBs and
+			// no OKE cluster. That is an argument from absence — the compute
+			// collector records no subnet placement, so an instance elsewhere
+			// could still be routing through here without the inventory
+			// showing it.
+			"oci.nat_gateway", "nat", "nat_ip", "203.0.113.44",
+		},
+	}
+	for xi, x := range overlapping {
+		out = append(out, ociAsset("oci.vcn", x.id, x.name, x.region, "AVAILABLE", 336+xi,
+			tags("compartment_id", x.compartment, "cidr_blocks", x.cidr, "dns_label", strings.ReplaceAll(x.name, "-", "")),
+			map[string]any{"id": x.id, "displayName": x.name, "cidrBlocks": []string{x.cidr}}))
+
+		for si, s := range x.subnets {
+			id := fmt.Sprintf("ocid1.subnet.oc1.%s.aaaaaaaa%s%s", x.region, strings.ReplaceAll(x.name, "-", ""), s.suffix)
+			out = append(out, ociAsset("oci.subnet", id, x.name+"-"+s.suffix, x.region, "AVAILABLE", 337+xi+si,
+				tags(
+					"compartment_id", x.compartment,
+					"vcn_id", x.id,
+					"cidr_block", s.cidr,
+					"prohibit_public_ip_on_vnic", "true",
+				),
+				map[string]any{"id": id, "vcnId": x.id, "displayName": x.name + "-" + s.suffix}))
+		}
+
+		gwID := fmt.Sprintf("ocid1.%s.oc1.%s.aaaaaaaa%s%s", strings.TrimPrefix(x.gwType, "oci."), x.region, strings.ReplaceAll(x.name, "-", ""), x.gwSuffix)
+		out = append(out, ociAsset(x.gwType, gwID, x.name+"-"+x.gwSuffix, x.region, "AVAILABLE", 338+xi,
+			tags("compartment_id", x.compartment, "vcn_id", x.id, x.gwKey, x.gwVal),
+			map[string]any{"id": gwID, "vcnId": x.id}))
 	}
 
 	// Local peering between prod and staging.
@@ -713,46 +875,139 @@ func ociNetwork() []core.Asset {
 	return out
 }
 
-func ociCompute() []core.Asset {
-	out := make([]core.Asset, 0, 60)
+// ociInstance is one materialised compute instance. Instances are built
+// before their assets are, because two other sections have to agree with
+// them: boot volumes take their display name from the instance they were
+// created with, and the OKE worker nodes are the very machines the Kubernetes
+// section reports as v1.Node.
+type ociInstance struct {
+	id, name, region, compartment, shape, status, ad string
+	ocpus, memGB                                     int
+	owner, env                                       string
+}
+
+func ociInstances() []ociInstance {
 	r := newRNG(0x5eed03)
 	shapes := []string{"VM.Standard.E4.Flex", "VM.Standard.A1.Flex", "VM.Standard3.Flex", "BM.Standard.E4.128"}
 	roles := []string{"app", "worker", "cache", "build", "bastion", "gateway"}
 
+	out := make([]ociInstance, 0, 24+len(kubeNodes))
 	for i := 0; i < 24; i++ {
 		v := ociVCNs[i%len(ociVCNs)]
-		name := fmt.Sprintf("nw-%s-%s", r.pick(roles), pad(i))
-		id := fmt.Sprintf("ocid1.instance.oc1.%s.aaaaaaaanwinst%s", v.region, pad(i))
-		status := "RUNNING"
-		if i%11 == 7 {
-			status = "STOPPED"
+		owner, env := ownerEnv(i, v.compartment)
+		in := ociInstance{
+			id:          fmt.Sprintf("ocid1.instance.oc1.%s.aaaaaaaanwinst%s", v.region, pad(i)),
+			name:        fmt.Sprintf("nw-%s-%s", r.pick(roles), pad(i)),
+			region:      v.region,
+			compartment: v.compartment,
+			shape:       r.pick(shapes),
+			status:      "RUNNING",
+			ad:          fmt.Sprintf("fzTb:%s-AD-%d", strings.ToUpper(v.region), i%3+1),
+			ocpus:       2 + i%6,
+			memGB:       16 + (i%6)*16,
+			owner:       owner,
+			env:         env,
 		}
-		out = append(out, ociAsset("oci.compute.instance", id, name, v.region, status, 360+i,
+		if i%11 == 7 {
+			in.status = "STOPPED"
+		}
+		out = append(out, in)
+	}
+
+	// The OKE worker nodes. A full audit sees each of these machines twice —
+	// once from OCI, once from the Kubernetes API — under two ids, in two
+	// vocabularies, with no field linking them except the providerID the
+	// Kubernetes section writes into the Node's spec. Counting "how many
+	// machines do we run" across providers double-counts them unless someone
+	// deliberately joins the two.
+	for _, n := range kubeNodes {
+		comp := ociCompartmentProd
+		if n.cluster == kubeStageCluster {
+			comp = ociCompartmentStg
+		}
+		out = append(out, ociInstance{
+			id:          n.instanceOCID,
+			name:        n.name,
+			region:      kubeNodeRegion,
+			compartment: comp,
+			shape:       n.shape,
+			status:      "RUNNING",
+			ad:          n.ad,
+			ocpus:       n.ocpus(),
+			memGB:       n.memGiB,
+			owner:       "platform@northwind.example",
+			env:         envOf(comp),
+		})
+	}
+	return out
+}
+
+func ociCompute() []core.Asset {
+	insts := ociInstances()
+	out := make([]core.Asset, 0, len(insts)+40)
+
+	for i, in := range insts {
+		out = append(out, ociAsset("oci.compute.instance", in.id, in.name, in.region, in.status, 360+i,
 			tags(
-				"compartment_id", v.compartment,
-				"shape", r.pick(shapes),
-				"availability_domain", fmt.Sprintf("fzTb:%s-AD-%d", strings.ToUpper(v.region), i%3+1),
+				"compartment_id", in.compartment,
+				"shape", in.shape,
+				"availability_domain", in.ad,
 				"fault_domain", fmt.Sprintf("FAULT-DOMAIN-%d", i%3+1),
-				"ocpus", itoa(2+i%6),
-				"memory_gb", itoa(16+(i%6)*16),
-				"env", map[bool]string{true: "prod", false: "staging"}[v.compartment == ociCompartmentProd],
+				"ocpus", itoa(in.ocpus),
+				"memory_gb", itoa(in.memGB),
+				"env", in.env,
+				"owner", in.owner,
 			),
-			map[string]any{"id": id, "displayName": name, "lifecycleState": status}))
+			map[string]any{"id": in.id, "displayName": in.name, "lifecycleState": in.status}))
 	}
 
 	for i := 0; i < 18; i++ {
 		v := ociVCNs[i%len(ociVCNs)]
 		id := fmt.Sprintf("ocid1.volume.oc1.%s.aaaaaaaanwvol%s", v.region, pad(i))
+		// Offset the owner sequence so the untagged volumes aren't the same
+		// ordinals as the untagged instances — a gap that lines up perfectly
+		// across resource types looks like a pattern, and this one isn't.
+		owner, env := ownerEnv(i+3, v.compartment)
 		out = append(out, ociAsset("oci.block_volume", id, fmt.Sprintf("nw-data-%s", pad(i)), v.region, "AVAILABLE", 390+i,
-			tags("compartment_id", v.compartment, "size_gb", itoa(50+(i%8)*50), "vpus_per_gb", "10"),
+			tags("compartment_id", v.compartment, "size_gb", itoa(50+(i%8)*50), "vpus_per_gb", "10",
+				"owner", owner, "env", env),
 			map[string]any{"id": id, "sizeInGBs": 50 + (i%8)*50}))
 	}
-	for i := 0; i < 12; i++ {
-		v := ociVCNs[i%len(ociVCNs)]
-		id := fmt.Sprintf("ocid1.bootvolume.oc1.%s.aaaaaaaanwboot%s", v.region, pad(i))
-		out = append(out, ociAsset("oci.boot_volume", id, fmt.Sprintf("nw-boot-%s", pad(i)), v.region, "AVAILABLE", 410+i,
-			tags("compartment_id", v.compartment, "size_gb", "50", "image_id", "ocid1.image.oc1..aaaaaaaaol8"),
+
+	// Boot volumes take the display name of the instance they were created
+	// with. That default is the only link this inventory has between the two:
+	// ListBootVolumes returns no attachment record (see oci/storage.go), so a
+	// volume that was renamed, or detached and left behind, matches nothing —
+	// and a name match is evidence of an attachment, never proof of one.
+	//
+	// Two of these belong to instances that are STOPPED. Compute stops billing
+	// when an instance stops; the storage under it does not. How long they have
+	// been stopped is not knowable here: OCI's lifecycle state carries no
+	// transition time, and CreatedAt is when the instance was made, not when it
+	// was last switched off.
+	for _, i := range bootVolumeInstances(insts) {
+		in := insts[i]
+		id := fmt.Sprintf("ocid1.bootvolume.oc1.%s.aaaaaaaanwboot%s", in.region, pad(i))
+		out = append(out, ociAsset("oci.boot_volume", id, in.name, in.region, "AVAILABLE", 410+i,
+			tags("compartment_id", in.compartment, "availability_domain", in.ad,
+				"size_gb", "50", "image_id", "ocid1.image.oc1..aaaaaaaaol8",
+				"owner", in.owner, "env", in.env),
 			map[string]any{"id": id, "sizeInGBs": 50}))
+	}
+	return out
+}
+
+// bootVolumeInstances picks which instances have a boot volume in the fixture:
+// the first twelve, plus every stopped instance beyond them. The stopped ones
+// are listed explicitly rather than left to chance — "a machine that is off
+// with its disk still allocated" is the case worth having, and it must not
+// depend on where the stopped instances happen to land.
+func bootVolumeInstances(insts []ociInstance) []int {
+	out := make([]int, 0, 14)
+	for i, in := range insts {
+		if i < 12 || in.status == "STOPPED" {
+			out = append(out, i)
+		}
 	}
 	return out
 }
@@ -767,9 +1022,11 @@ func ociData() []core.Asset {
 			comp = ociCompartmentStg
 		}
 		id := "ocid1.bucket.oc1.eu-frankfurt-1.aaaaaaaa" + strings.ReplaceAll(b, "-", "")
+		owner, env := ownerEnv(i+2, comp)
 		out = append(out, ociAsset("oci.object_storage.bucket", id, b, "eu-frankfurt-1", "ACTIVE", 430+i,
 			tags("compartment_id", comp, "namespace", "frnwnorthwind", "storage_tier", "Standard",
-				"public_access_type", "NoPublicAccess", "versioning", "Enabled", "approximate_count", itoa(1200+i*431)),
+				"public_access_type", "NoPublicAccess", "versioning", "Enabled", "approximate_count", itoa(1200+i*431),
+				"owner", owner, "env", env),
 			map[string]any{"name": b, "namespace": "frnwnorthwind", "storageTier": "Standard"}))
 	}
 
@@ -779,9 +1036,11 @@ func ociData() []core.Asset {
 	}
 	for i, d := range adbs {
 		id := fmt.Sprintf("ocid1.autonomousdatabase.oc1.eu-frankfurt-1.aaaaaaaanwadb%d", i)
+		owner, env := ownerEnv(i, d.comp)
 		out = append(out, ociAsset("oci.autonomous_database", id, d.name, "eu-frankfurt-1", "AVAILABLE", 440+i,
 			tags("compartment_id", d.comp, "workload", d.workload, "ocpu_count", itoa(2+i*2),
-				"storage_tb", itoa(1+i), "license_model", "LICENSE_INCLUDED", "is_mtls_required", "true"),
+				"storage_tb", itoa(1+i), "license_model", "LICENSE_INCLUDED", "is_mtls_required", "true",
+				"owner", owner, "env", env),
 			map[string]any{"id": id, "dbName": d.name, "dbWorkload": d.workload}))
 	}
 
@@ -871,28 +1130,110 @@ func ociIAM() []core.Asset {
 // Kubernetes
 // ----------------------------------------------------------------------
 
+// kubeWorkload is one Deployment/StatefulSet/DaemonSet and the pods it owns.
+//
+// The resource columns are why this table is wider than a workload list needs
+// to be. requests/limits are what the manifest *asked for*; cpuMilli/memMi are
+// what metrics-server *observed*. The distance between the two is the only
+// evidence an inventory can offer about sizing, and it is evidence about the
+// sampled window, not about the workload: a job that is idle now and saturates
+// every night hour looks identical here to one that is idle forever.
+//
+// The spread is deliberate. Two workloads ask for an order of magnitude more
+// than they use, most are sensible, two set no requests at all, and one sets
+// requests without limits — so a consumer has to handle "wildly over",
+// "fine", and "the question does not apply".
 type kubeWorkload struct {
 	cluster, ns, app, kind string
 	replicas               int
+
+	// Manifest values in Kubernetes quantity notation, applied to every
+	// container of every pod. "" means the field is genuinely absent from the
+	// manifest — a BestEffort pod, where "is this over-requested?" has no
+	// answer rather than a large one.
+	cpuReq, memReq, cpuLim, memLim string
+
+	// Observed per-pod usage, in millicores and MiB. Zero means no
+	// observation exists at all: the staging cluster has no metrics-server
+	// (its absence is one of the three errors demoErrors streams), so nothing
+	// there can be compared against its requests, however wasteful it looks.
+	cpuMilli, memMi int
 }
 
 var kubeWorkloads = []kubeWorkload{
-	{kubeProdCluster, "nw-edge", "edge-gateway", "Deployment", 3},
-	{kubeProdCluster, "nw-edge", "cert-rotator", "Deployment", 1},
-	{kubeProdCluster, "nw-shop", "storefront", "Deployment", 4},
-	{kubeProdCluster, "nw-shop", "catalog", "Deployment", 3},
-	{kubeProdCluster, "nw-shop", "search", "Deployment", 2},
-	{kubeProdCluster, "nw-payments", "payments-api", "Deployment", 3},
-	{kubeProdCluster, "nw-payments", "ledger", "StatefulSet", 3},
-	{kubeProdCluster, "nw-platform", "redis", "StatefulSet", 3},
-	{kubeProdCluster, "nw-platform", "log-shipper", "DaemonSet", 4},
-	{kubeProdCluster, "monitoring", "prometheus", "StatefulSet", 2},
-	{kubeProdCluster, "monitoring", "grafana", "Deployment", 1},
-	{kubeStageCluster, "nw-edge", "stage-gateway", "Deployment", 2},
-	{kubeStageCluster, "nw-shop", "storefront", "Deployment", 2},
-	{kubeStageCluster, "nw-shop", "catalog", "Deployment", 2},
-	{kubeStageCluster, "sandbox", "scratch", "Deployment", 1},
-	{kubeStageCluster, "monitoring", "prometheus", "StatefulSet", 1},
+	// cluster           namespace      app             kind           n   cpuReq  memReq   cpuLim  memLim  cpuUse memUse
+	{kubeProdCluster, "nw-edge", "edge-gateway", "Deployment", 3, "500m", "512Mi", "1", "1Gi", 210, 240},
+	{kubeProdCluster, "nw-edge", "cert-rotator", "Deployment", 1, "10m", "32Mi", "100m", "64Mi", 2, 18},
+	{kubeProdCluster, "nw-shop", "storefront", "Deployment", 4, "250m", "512Mi", "1", "1Gi", 120, 300},
+	{kubeProdCluster, "nw-shop", "catalog", "Deployment", 3, "2", "4Gi", "2", "4Gi", 130, 700},   // ~15x its CPU request
+	{kubeProdCluster, "nw-shop", "search", "Deployment", 2, "6", "12Gi", "6", "12Gi", 200, 1500}, // sized for a reindex that runs quarterly
+	{kubeProdCluster, "nw-payments", "payments-api", "Deployment", 3, "1", "1Gi", "2", "2Gi", 640, 700},
+	{kubeProdCluster, "nw-payments", "ledger", "StatefulSet", 3, "4", "8Gi", "4", "8Gi", 380, 2100},
+	{kubeProdCluster, "nw-platform", "redis", "StatefulSet", 3, "100m", "2Gi", "", "", 90, 1800}, // requests, no limits
+	{kubeProdCluster, "nw-platform", "log-shipper", "DaemonSet", 5, "50m", "128Mi", "200m", "256Mi", 40, 90},
+	{kubeProdCluster, "monitoring", "prometheus", "StatefulSet", 2, "2", "8Gi", "4", "12Gi", 1450, 6500},
+	{kubeProdCluster, "monitoring", "grafana", "Deployment", 1, "", "", "", "", 60, 180}, // BestEffort: no requests at all
+	{kubeStageCluster, "nw-edge", "stage-gateway", "Deployment", 2, "500m", "512Mi", "1", "1Gi", 0, 0},
+	{kubeStageCluster, "nw-shop", "storefront", "Deployment", 2, "250m", "512Mi", "1", "1Gi", 0, 0},
+	{kubeStageCluster, "nw-shop", "catalog", "Deployment", 2, "2", "4Gi", "2", "4Gi", 0, 0}, // as over-asked as prod, unobservably so
+	{kubeStageCluster, "sandbox", "scratch", "Deployment", 1, "", "", "", "", 0, 0},
+	{kubeStageCluster, "monitoring", "prometheus", "StatefulSet", 1, "2", "8Gi", "4", "12Gi", 0, 0},
+}
+
+// kubeNodeRegion is where both OKE clusters run — it matches the region of the
+// oci.oke.cluster assets, because these nodes are instances in that tenancy.
+const kubeNodeRegion = "eu-frankfurt-1"
+
+// kubeNode is a cluster member machine. instanceOCID is the OCI instance the
+// node runs on, which the Node's spec.providerID publishes: it is the only
+// field in either provider's output that ties the two representations of one
+// machine together.
+type kubeNode struct {
+	cluster, name, shape, ad, pool, instanceOCID string
+	cpu, memGiB                                  int
+}
+
+// The prod cluster is four working nodes plus a fifth that nothing but the
+// DaemonSet ever lands on — see kubeNodeFor. Sizes are deliberately mixed so
+// "how much headroom is there" can't be answered by multiplying one number by
+// the node count.
+var kubeNodes = []kubeNode{
+	{kubeProdCluster, "oke-prod-node-01", "VM.Standard.E4.Flex", "fzTb:EU-FRANKFURT-1-AD-1", "np-prod-general", "ocid1.instance.oc1.eu-frankfurt-1.aaaaaaaaokeprodnode01", 16, 128},
+	{kubeProdCluster, "oke-prod-node-02", "VM.Standard.E4.Flex", "fzTb:EU-FRANKFURT-1-AD-2", "np-prod-general", "ocid1.instance.oc1.eu-frankfurt-1.aaaaaaaaokeprodnode02", 16, 128},
+	{kubeProdCluster, "oke-prod-node-03", "VM.Standard.E4.Flex", "fzTb:EU-FRANKFURT-1-AD-3", "np-prod-general", "ocid1.instance.oc1.eu-frankfurt-1.aaaaaaaaokeprodnode03", 16, 128},
+	{kubeProdCluster, "oke-prod-node-04", "VM.Standard.E4.Flex", "fzTb:EU-FRANKFURT-1-AD-1", "np-prod-general", "ocid1.instance.oc1.eu-frankfurt-1.aaaaaaaaokeprodnode04", 16, 128},
+	{kubeProdCluster, "oke-prod-node-05", "VM.Standard.A1.Flex", "fzTb:EU-FRANKFURT-1-AD-2", "np-prod-arm", "ocid1.instance.oc1.eu-frankfurt-1.aaaaaaaaokeprodnode05", 8, 48},
+	{kubeStageCluster, "oke-stage-node-01", "VM.Standard.E4.Flex", "fzTb:EU-FRANKFURT-1-AD-1", "np-stage", "ocid1.instance.oc1.eu-frankfurt-1.aaaaaaaaokestagenode1", 8, 64},
+	{kubeStageCluster, "oke-stage-node-02", "VM.Standard.E4.Flex", "fzTb:EU-FRANKFURT-1-AD-2", "np-stage", "ocid1.instance.oc1.eu-frankfurt-1.aaaaaaaaokestagenode2", 8, 64},
+}
+
+// ocpus converts the node's vCPU capacity into the OCPU count OCI bills for:
+// one OCPU is two vCPUs on the x86 shapes and one on Ampere. Two numbers
+// describe one machine and they disagree by a factor of two, which is a good
+// reason never to join a Kubernetes Node to an OCI instance on size.
+func (n kubeNode) ocpus() int {
+	if strings.Contains(n.shape, "A1.Flex") {
+		return n.cpu
+	}
+	return n.cpu / 2
+}
+
+// arch follows from the shape — Ampere nodes are arm64, everything else amd64.
+func (n kubeNode) arch() string {
+	if strings.Contains(n.shape, "A1.Flex") {
+		return "arm64"
+	}
+	return "amd64"
+}
+
+func kubeNodesFor(cluster string) []kubeNode {
+	out := make([]kubeNode, 0, len(kubeNodes))
+	for _, n := range kubeNodes {
+		if n.cluster == cluster {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 type kubeService struct {
@@ -925,13 +1266,15 @@ var kubeServices = []kubeService{
 }
 
 func kubernetesAssets() []core.Asset {
-	out := make([]core.Asset, 0, 150)
+	out := make([]core.Asset, 0, 210)
 	out = append(out, kubeNamespaces()...)
+	out = append(out, kubeNodeAssets()...)
 	out = append(out, kubeWorkloadAssets()...)
 	out = append(out, kubeServiceAssets()...)
 	out = append(out, kubeGatewayAssets()...)
 	out = append(out, kubeNetworkPolicies()...)
 	out = append(out, kubeSupportingAssets()...)
+	out = append(out, kubeMetricsAssets()...)
 	return out
 }
 
@@ -988,10 +1331,186 @@ func kubeNamespaces() []core.Asset {
 	return out
 }
 
-func kubeWorkloadAssets() []core.Asset {
-	out := make([]core.Asset, 0, 60)
+// kubeNodeAssets emit the cluster members. Capacity and allocatable live in
+// Raw only, because that is where the real provider leaves them: the
+// Kubernetes collector copies labels into Tags and nothing else, so anything
+// derived from node size needs --include-raw, exactly like the gateway
+// resolvers do.
+func kubeNodeAssets() []core.Asset {
+	out := make([]core.Asset, 0, len(kubeNodes))
+	for i, n := range kubeNodes {
+		labels := map[string]string{
+			"kubernetes.io/hostname":           n.name,
+			"kubernetes.io/arch":               n.arch(),
+			"kubernetes.io/os":                 "linux",
+			"node.kubernetes.io/instance-type": n.shape,
+			"topology.kubernetes.io/region":    kubeNodeRegion,
+			"topology.kubernetes.io/zone":      n.ad,
+			"oke.oraclecloud.com/pool.name":    n.pool,
+		}
+		version := "v1.30.1"
+		internalIP := fmt.Sprintf("10.20.16.%d", 11+i)
+		if n.cluster == kubeStageCluster {
+			version = "v1.29.4" // matches the stage oci.oke.cluster asset
+			internalIP = fmt.Sprintf("10.30.16.%d", 11+i)
+		}
+		out = append(out, kubeAsset(n.cluster, "v1.Node", "", n.name, "Ready=True", 510+i,
+			labels,
+			map[string]any{
+				"apiVersion": "v1", "kind": "Node",
+				"metadata": map[string]any{"name": n.name, "labels": labels},
+				// providerID is the one field that says which OCI instance
+				// this is. Without it the same machine is two unrelated assets.
+				"spec": map[string]any{"providerID": "oci://" + n.instanceOCID},
+				"status": map[string]any{
+					"capacity":    kubeNodeCapacity(n),
+					"allocatable": kubeNodeAllocatable(n),
+					"nodeInfo": map[string]any{
+						"kubeletVersion":          version,
+						"osImage":                 "Oracle Linux Server 8.9",
+						"architecture":            n.arch(),
+						"containerRuntimeVersion": "cri-o://1.30.0",
+					},
+					"conditions": []any{map[string]any{"type": "Ready", "status": "True", "reason": "KubeletReady"}},
+					"addresses": []any{
+						map[string]any{"type": "InternalIP", "address": internalIP},
+						map[string]any{"type": "Hostname", "address": n.name},
+					},
+				},
+			}))
+	}
+	return out
+}
+
+// kubeNodeCapacity is what the machine has; kubeNodeAllocatable is what the
+// scheduler may hand out. The difference — a couple of hundred millicores and
+// ~2.5 GiB — is kube-reserved plus the eviction threshold. Measuring how full a
+// cluster is against capacity instead of allocatable overstates the headroom by
+// that much per node, which is where "we have plenty of room" comes from on a
+// cluster that is already refusing to schedule.
+//
+// Note the two spellings of the same dimension: capacity says "16", allocatable
+// says "15800m". Real nodes do exactly this, and a reader that handles only one
+// form will misread half the fields on the object.
+func kubeNodeCapacity(n kubeNode) map[string]any {
+	return map[string]any{
+		"cpu":               itoa(n.cpu),
+		"memory":            itoa(n.memGiB*1048576) + "Ki",
+		"pods":              "110",
+		"ephemeral-storage": "104857600Ki",
+	}
+}
+
+func kubeNodeAllocatable(n kubeNode) map[string]any {
+	return map[string]any{
+		"cpu":               itoa(n.cpu*1000-200) + "m",
+		"memory":            itoa(n.memGiB*1048576-2621440) + "Ki",
+		"pods":              "110",
+		"ephemeral-storage": "96636764Ki",
+	}
+}
+
+// kubePod is one materialised pod. The Pod asset, its PodMetrics, and the
+// NodeMetrics totals all have to agree about placement and usage, so those
+// facts are decided once here instead of three times.
+type kubePod struct {
+	w        kubeWorkload
+	name     string
+	node     string
+	phase    string
+	labels   map[string]string
+	podIP    string
+	image    string
+	cpuMilli int // observed usage; 0 when nothing observed this pod
+	memMi    int
+}
+
+// kubePodsByWorkload materialises every pod, grouped by workload so the asset
+// stream keeps its "workload then its pods" order.
+func kubePodsByWorkload() [][]kubePod {
 	r := newRNG(0x5eed05)
 	suffixes := []string{"2k9dl", "7mzqp", "x4v8t", "b6rnc", "q1wsy", "z3hkf", "n8tpv", "j5gbm"}
+
+	out := make([][]kubePod, 0, len(kubeWorkloads))
+	for wi, w := range kubeWorkloads {
+		// A pod-template-hash shaped like the real thing, derived from the
+		// workload identity so it never changes between runs.
+		h := fnv.New32a()
+		_, _ = h.Write([]byte(w.cluster + "/" + w.ns + "/" + w.app))
+		hash := fmt.Sprintf("%x", h.Sum32()&0xffffff)
+		// Offsetting the random pick by the replica index keeps the suffixes
+		// distinct within a workload — two pods of one Deployment sharing a
+		// name would collide on the content-derived UID.
+		base := r.n(len(suffixes))
+
+		pods := make([]kubePod, 0, w.replicas)
+		for pi := 0; pi < w.replicas; pi++ {
+			phase := "Running"
+			if wi%9 == 4 && pi == 0 {
+				phase = "Pending"
+			}
+			p := kubePod{
+				w:     w,
+				name:  fmt.Sprintf("%s-%s-%s", w.app, hash, suffixes[(base+pi)%len(suffixes)]),
+				node:  kubeNodeFor(w, wi, pi),
+				phase: phase,
+				labels: map[string]string{
+					"app":                    w.app,
+					"app.kubernetes.io/name": w.app,
+					"pod-template-hash":      hash,
+				},
+				podIP: fmt.Sprintf("10.244.%d.%d", wi, pi+2),
+				image: "registry.northwind.example/" + w.app + ":1." + itoa(wi) + "." + itoa(pi),
+			}
+			// A Pending pod has been scheduled but isn't running, so
+			// metrics-server has nothing to report for it — and because its
+			// requests are already charged against the node, it widens the
+			// gap between requested and used rather than being neutral.
+			if w.cpuMilli > 0 && phase == "Running" {
+				p.cpuMilli = jitter(r, w.cpuMilli)
+				p.memMi = jitter(r, w.memMi)
+			}
+			pods = append(pods, p)
+		}
+		out = append(out, pods)
+	}
+	return out
+}
+
+// kubeNodeFor places a pod on one of its cluster's nodes. DaemonSet pods go
+// one per node — that is what a DaemonSet is — and everything else
+// round-robins over all but the last node of a cluster big enough to spare
+// one. Leaving oke-prod-node-05 carrying nothing but its DaemonSet pod is
+// deliberate: capacity that was bought and never scheduled onto is a real and
+// expensive shape, and a perfectly balanced fixture could not show it.
+func kubeNodeFor(w kubeWorkload, wi, pi int) string {
+	ns := kubeNodesFor(w.cluster)
+	if w.kind == "DaemonSet" {
+		return ns[pi%len(ns)].name
+	}
+	pool := ns
+	if len(pool) > 2 {
+		pool = pool[:len(pool)-1]
+	}
+	return pool[(wi+pi)%len(pool)].name
+}
+
+// jitter varies a measured value by ±6% so no two replicas report a suspiciously
+// identical reading. The PRNG is the section's seeded one, so the variation is
+// fixed across runs.
+func jitter(r *rng, v int) int {
+	if v <= 0 {
+		return v
+	}
+	if out := v * (94 + r.n(13)) / 100; out > 0 {
+		return out
+	}
+	return 1
+}
+
+func kubeWorkloadAssets() []core.Asset {
+	out := make([]core.Asset, 0, 80)
+	podsByWorkload := kubePodsByWorkload()
 
 	for wi, w := range kubeWorkloads {
 		apiVersion := "apps/v1"
@@ -1004,44 +1523,61 @@ func kubeWorkloadAssets() []core.Asset {
 				"spec": map[string]any{
 					"replicas": w.replicas,
 					"selector": map[string]any{"matchLabels": map[string]any{"app": w.app}},
+					"template": map[string]any{
+						"spec": map[string]any{"containers": []any{map[string]any{
+							"name":      w.app,
+							"resources": kubeResources(w),
+						}}},
+					},
 				},
 				"status": map[string]any{"readyReplicas": w.replicas, "replicas": w.replicas},
 			}))
 
-		// A pod-template-hash shaped like the real thing, derived from the
-		// workload identity so it never changes between runs.
-		h := fnv.New32a()
-		_, _ = h.Write([]byte(w.cluster + "/" + w.ns + "/" + w.app))
-		hash := fmt.Sprintf("%x", h.Sum32()&0xffffff)
-		// Offsetting the random pick by the replica index keeps the suffixes
-		// distinct within a workload — two pods of one Deployment sharing a
-		// name would collide on the content-derived UID.
-		base := r.n(len(suffixes))
-		for pi := 0; pi < w.replicas; pi++ {
-			podName := fmt.Sprintf("%s-%s-%s", w.app, hash, suffixes[(base+pi)%len(suffixes)])
-			phase := "Running"
-			if wi%9 == 4 && pi == 0 {
-				phase = "Pending"
-			}
-			podLabels := map[string]string{
-				"app":                    w.app,
-				"app.kubernetes.io/name": w.app,
-				"pod-template-hash":      hash,
-			}
-			out = append(out, kubeAsset(w.cluster, "v1.Pod", w.ns, podName, phase, 540+wi*4+pi,
-				podLabels,
+		for pi, p := range podsByWorkload[wi] {
+			out = append(out, kubeAsset(w.cluster, "v1.Pod", w.ns, p.name, p.phase, 540+wi*4+pi,
+				p.labels,
 				map[string]any{
 					"apiVersion": "v1", "kind": "Pod",
-					"metadata": map[string]any{"name": podName, "namespace": w.ns, "labels": podLabels},
+					"metadata": map[string]any{"name": p.name, "namespace": w.ns, "labels": p.labels},
 					"spec": map[string]any{
-						"nodeName":   fmt.Sprintf("oke-node-%02d", pi+wi%4),
-						"containers": []any{map[string]any{"name": w.app, "image": "registry.northwind.example/" + w.app + ":1." + itoa(wi) + "." + itoa(pi)}},
+						"nodeName": p.node,
+						"containers": []any{map[string]any{
+							"name":      w.app,
+							"image":     p.image,
+							"resources": kubeResources(w),
+						}},
 					},
-					"status": map[string]any{"phase": phase, "podIP": fmt.Sprintf("10.244.%d.%d", wi, pi+2)},
+					"status": map[string]any{"phase": p.phase, "podIP": p.podIP},
 				}))
 		}
 	}
 	return out
+}
+
+// kubeResources renders a container's resources stanza. A workload that sets
+// neither requests nor limits gets an empty object — which is what the API
+// server stores for a BestEffort container, and is distinguishable from
+// "requests: 0" only by looking for the key rather than reading its value.
+func kubeResources(w kubeWorkload) map[string]any {
+	res := map[string]any{}
+	if q := kubeQuantities(w.cpuReq, w.memReq); len(q) > 0 {
+		res["requests"] = q
+	}
+	if q := kubeQuantities(w.cpuLim, w.memLim); len(q) > 0 {
+		res["limits"] = q
+	}
+	return res
+}
+
+func kubeQuantities(cpu, mem string) map[string]any {
+	q := map[string]any{}
+	if cpu != "" {
+		q["cpu"] = cpu
+	}
+	if mem != "" {
+		q["memory"] = mem
+	}
+	return q
 }
 
 func kubeServiceAssets() []core.Asset {
@@ -1267,19 +1803,128 @@ func kubeSupportingAssets() []core.Asset {
 				"status":   map[string]any{"phase": "Bound"}}))
 	}
 	// A CRD kind, to show discovery-driven collection picking up types the
-	// tool has never heard of.
-	hosts := []string{"northwind.example", "www.northwind.example", "shop.northwind.example", "pay.northwind.example", "grafana.northwind.example", "stage.northwind.io"}
-	for i, h := range hosts {
+	// tool has never heard of — and, because cert-manager records notAfter in
+	// its status, the one expiry date in the fixture that comes from inside a
+	// cluster rather than from a provider API.
+	//
+	// shop.northwind.example is the interesting one: it expires in nine days
+	// and its renewalTime is three weeks in the past, so cert-manager should
+	// already have replaced it and hasn't. The object still reports Ready=True,
+	// which is why a status column alone never surfaces this.
+	certHosts := []struct {
+		host         string
+		expiresHours int
+	}{
+		{"northwind.example", 60 * 24},
+		{"www.northwind.example", 71 * 24},
+		{"shop.northwind.example", 9 * 24},
+		{"pay.northwind.example", 66 * 24},
+		{"grafana.northwind.example", 74 * 24},
+		{"stage.northwind.io", 80 * 24},
+	}
+	for i, c := range certHosts {
 		cluster := kubeProdCluster
 		ns := "nw-edge"
 		if i == 5 {
 			cluster, ns = kubeStageCluster, "nw-edge"
 		}
-		out = append(out, kubeAsset(cluster, "cert-manager.io/v1.Certificate", ns, h, "Ready=True", 720+i,
+		out = append(out, kubeAsset(cluster, "cert-manager.io/v1.Certificate", ns, c.host, "Ready=True", 720+i,
 			nil,
 			map[string]any{"apiVersion": "cert-manager.io/v1", "kind": "Certificate",
-				"metadata": map[string]any{"name": h, "namespace": ns},
-				"spec":     map[string]any{"dnsNames": []any{h}, "issuerRef": map[string]any{"name": "letsencrypt-prod"}}}))
+				"metadata": map[string]any{"name": c.host, "namespace": ns},
+				"spec":     map[string]any{"dnsNames": []any{c.host}, "issuerRef": map[string]any{"name": "letsencrypt-prod"}},
+				"status": map[string]any{
+					"notAfter": expiresAt(c.expiresHours),
+					// cert-manager schedules renewal 30 days out by default.
+					"renewalTime": expiresAt(c.expiresHours - 30*24),
+					"conditions":  []any{map[string]any{"type": "Ready", "status": "True"}},
+				}}))
+	}
+	return out
+}
+
+// kubeMetricsAssets emit what the metrics API serves: one PodMetrics per
+// running pod, one NodeMetrics per node. They are collected like any other
+// discovered type — metrics.k8s.io is an aggregated API, so it comes back from
+// ServerPreferredResources and gets listed with everything else.
+//
+// Only the prod cluster has them. The staging cluster's metrics API is absent,
+// which the demo already streams as a collection error, so half the fixture's
+// workloads have requests and no usage at all. That asymmetry is the point:
+// the same over-sized catalog Deployment exists in both clusters, and only one
+// of them can be said anything about.
+//
+// Three properties are load-bearing and should survive any edit here:
+//
+//   - There is no PodMetrics for the Pending pod. The metrics API holds no
+//     entry for a pod that isn't running, so a join has to cope with the row
+//     being missing rather than reading its absence as zero usage.
+//   - Pod usage is in Mi, node usage in Ki. metrics-server reports Ki and
+//     kubectl top renders Mi; both are real, and a parser that assumes one
+//     spelling is quietly wrong by a factor of 1024 on the other.
+//   - A node's usage is larger than the sum of its pods'. The kubelet, the
+//     container runtime and the OS belong to no pod. A fixture where the two
+//     reconciled exactly would let a consumer confirm its arithmetic against a
+//     number no real cluster produces.
+func kubeMetricsAssets() []core.Asset {
+	// Per-node overhead outside any pod. Roughly what a kubelet, a CRI
+	// runtime and a logging agent cost on an idle Oracle Linux node.
+	const (
+		systemCPUMilli = 180
+		systemMemMi    = 1100
+	)
+
+	out := make([]core.Asset, 0, 40)
+	nodeCPU := map[string]int{}
+	nodeMem := map[string]int{}
+
+	for _, pods := range kubePodsByWorkload() {
+		for _, p := range pods {
+			if p.cpuMilli == 0 {
+				continue
+			}
+			nodeCPU[p.node] += p.cpuMilli
+			nodeMem[p.node] += p.memMi
+
+			offset := 730 + len(out)
+			out = append(out, kubeAsset(p.w.cluster, "metrics.k8s.io/v1beta1.PodMetrics", p.w.ns, p.name, "", offset,
+				p.labels,
+				map[string]any{
+					"apiVersion": "metrics.k8s.io/v1beta1", "kind": "PodMetrics",
+					"metadata":  map[string]any{"name": p.name, "namespace": p.w.ns, "labels": p.labels},
+					"timestamp": created(offset).UTC().Format(time.RFC3339),
+					// The window is what "usage" was averaged over. Thirty
+					// seconds of one afternoon is the entire evidential basis
+					// for every number in this object.
+					"window": "30s",
+					"containers": []any{map[string]any{
+						"name": p.w.app,
+						"usage": map[string]any{
+							"cpu":    itoa(p.cpuMilli) + "m",
+							"memory": itoa(p.memMi) + "Mi",
+						},
+					}},
+				}))
+		}
+	}
+
+	for i, n := range kubeNodes {
+		if n.cluster != kubeProdCluster {
+			continue
+		}
+		offset := 745 + i
+		out = append(out, kubeAsset(n.cluster, "metrics.k8s.io/v1beta1.NodeMetrics", "", n.name, "", offset,
+			map[string]string{"kubernetes.io/hostname": n.name},
+			map[string]any{
+				"apiVersion": "metrics.k8s.io/v1beta1", "kind": "NodeMetrics",
+				"metadata":  map[string]any{"name": n.name},
+				"timestamp": created(offset).UTC().Format(time.RFC3339),
+				"window":    "30s",
+				"usage": map[string]any{
+					"cpu":    itoa(nodeCPU[n.name]+systemCPUMilli) + "m",
+					"memory": itoa((nodeMem[n.name]+systemMemMi)*1024) + "Ki",
+				},
+			}))
 	}
 	return out
 }
@@ -1313,6 +1958,19 @@ func gcpAssets() []core.Asset {
 		})
 	}
 
+	// GCP label values are lowercase alphanumerics, dashes and underscores —
+	// they cannot hold an "@", so the owner convention here is a bare team
+	// name where OCI's freeform tags carry an email. Two conventions for one
+	// question is what "who owns this?" looks like across two clouds, and
+	// Cloudflare has no resource tagging at all, so a third of this inventory
+	// cannot answer it even in principle.
+	gcpOwner := func(seq int) string {
+		if owner := ownerFor(seq); owner != "" {
+			return strings.Split(owner, "@")[0]
+		}
+		return ""
+	}
+
 	for i := 0; i < 18; i++ {
 		zone := zones[i%len(zones)]
 		name := fmt.Sprintf("nw-analytics-%s", pad(i))
@@ -1321,8 +1979,14 @@ func gcpAssets() []core.Asset {
 		if i%8 == 6 {
 			state = "TERMINATED"
 		}
+		owner := gcpOwner(i + 5)
+		env, team := "prod", "data"
+		if owner == "" {
+			env, team = "", "" // unlabelled resources are unlabelled entirely
+		}
 		add("compute.googleapis.com/Instance", full, name, zone, state, 760+i,
-			tags("machine_type", r.pick(machines), "env", "prod", "team", "data", "network_tags", "allow-health-checks"),
+			tags("machine_type", r.pick(machines), "env", env, "team", team, "owner", owner,
+				"network_tags", "allow-health-checks"),
 			map[string]any{"name": full, "assetType": "compute.googleapis.com/Instance", "state": state})
 	}
 
@@ -1330,7 +1994,8 @@ func gcpAssets() []core.Asset {
 		name := fmt.Sprintf("nw-lake-%s", pad(i))
 		full := fmt.Sprintf("//storage.googleapis.com/%s", name)
 		add("storage.googleapis.com/Bucket", full, name, "europe-west3", "", 790+i,
-			tags("storage_class", r.pick([]string{"STANDARD", "NEARLINE", "COLDLINE"}), "team", "data", "uniform_access", "true"),
+			tags("storage_class", r.pick([]string{"STANDARD", "NEARLINE", "COLDLINE"}), "team", "data",
+				"owner", gcpOwner(i+1), "uniform_access", "true"),
 			map[string]any{"name": full, "assetType": "storage.googleapis.com/Bucket"})
 	}
 
@@ -1384,7 +2049,8 @@ func gcpAssets() []core.Asset {
 		name := fmt.Sprintf("nw-disk-%s", pad(i))
 		full := fmt.Sprintf("//compute.googleapis.com/projects/%s/zones/%s/disks/%s", gcpProject, zone, name)
 		add("compute.googleapis.com/Disk", full, name, zone, "READY", 845+i,
-			tags("size_gb", itoa(100+(i%5)*100), "disk_type", "pd-balanced", "team", "data"),
+			tags("size_gb", itoa(100+(i%5)*100), "disk_type", "pd-balanced", "team", "data",
+				"owner", gcpOwner(i+7)),
 			map[string]any{"name": full, "assetType": "compute.googleapis.com/Disk"})
 	}
 
