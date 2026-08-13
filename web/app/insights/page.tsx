@@ -526,12 +526,12 @@ function Band({
             {rate && (
               <>
                 {' '}
-                The run rate adds up {fmtCount(rate.findings)} finding total
-                {rate.findings === 1 ? '' : 's'}, so a resource that two findings both count is
-                counted twice here — it is an upper bound across findings, not an estate bill. The
-                yearly figure is arithmetic, not a forecast: it assumes the estate does not change,
-                and it excludes every resource billed by consumption, because an inventory can see
-                the resource but never the consumption.
+                The run rate is the estate total, priced exactly as the Cost page prices it —
+                not a sum across the findings below, which each total a slice of the same money
+                and would count most of it several times over. The yearly figure is arithmetic,
+                not a forecast: it assumes the estate does not change, and it excludes every
+                resource billed by consumption, because an inventory can see the resource but
+                never the consumption.
                 {rate.unparsed > 0 && (
                   <>
                     {' '}

@@ -333,48 +333,61 @@ export interface RunRate {
 }
 
 /**
- * Rolls every finding's Total up into a monthly and yearly run rate.
+ * The estate's monthly and yearly run rate.
  *
- * Two things this deliberately does not do, both of which the band's caveat
- * has to state because no amount of care here can fix them:
+ * Read from the `cost.run-rate` finding, which is the one insight whose Total
+ * is the estate — every other cost finding totals a *slice* of it. Summing
+ * them instead counts the same money several times over by construction: a
+ * dollar of compute appears in cost.by-dimension once per dimension, again in
+ * cost.concentration, and again in cost.showback. That sum was showing
+ * ~$20,888/month for an estate the Cost page prices at ~$3,010, under a label
+ * the reader would reasonably take as the total.
  *
- *  - It does not de-duplicate. Two cost findings can legitimately count the
- *    same volume ("detached" and "unattached in a stopped compartment"), and
- *    nothing in the wire format says which assets a Total covered. The sum is
- *    therefore an upper bound across findings, not an estate total — the Cost
- *    page's own roll-up is the number for that.
- *  - It does not annualise anything but arithmetic. ×12 is a *run rate*: what
- *    the current shape costs if it neither grows nor shrinks and nothing is
- *    billed by consumption. It is not a forecast and must not be labelled one.
+ * A caveat cannot rescue a number that is wrong; it can only make it wrong and
+ * disclaimed. So the band shows the one figure that means what its label says,
+ * and shows nothing at all when that finding did not run.
+ *
+ * The one thing it still does not do is annualise anything but arithmetic. ×12
+ * is a *run rate*: what the current shape costs if it neither grows nor shrinks
+ * and nothing is billed by consumption. It is not a forecast, and the band must
+ * not label it one.
  */
 export function runRate(findings: readonly Finding[]): RunRate | null {
-  const acc = new Map<string, { measured: number; estimated: number }>();
-  let contributing = 0;
-  let unparsed = 0;
+  const estate = findings.find((f) => f.id === RUN_RATE_ID);
+  if (!estate) return null;
 
-  for (const f of findings) {
-    const t = f.total;
-    if (!t) continue;
-    const m = readAmount(t.measured);
-    const e = readAmount(t.estimated);
-    if (m.unparsed) unparsed += 1;
-    if (e.unparsed) unparsed += 1;
-    if (m.n === 0 && e.n === 0) {
-      // A total that is entirely unsummable still counts as a finding that
-      // wanted to contribute — otherwise "3 findings" would silently become
-      // "1 finding" and the reader would never learn two figures went missing.
-      if (m.unparsed || e.unparsed) contributing += 1;
+  // Read the per-currency rows rather than a single Total: the finding
+  // deliberately has none, because one Money cannot hold both USD and the EUR
+  // the mesh providers bill in, and this tool never converts between them.
+  const acc = new Map<string, { measured: number; estimated: number }>();
+  let unparsed = 0;
+  const yearly = new Map<string, { measured: number; estimated: number }>();
+  for (const row of estate.rows ?? []) {
+    if (!row.money) continue;
+    if (/yearly|annual/i.test(row.label)) {
+      // Take the yearly figure the finding computed rather than multiplying
+      // the monthly one here. Recomputing from an already-rounded monthly put
+      // this band four cents away from the CLI's number for the same estate,
+      // and two surfaces disagreeing about "the same" figure costs more trust
+      // than the four cents are worth.
+      const my = readAmount(row.money.measured);
+      const ey = readAmount(row.money.estimated);
+      yearly.set(row.money.currency ?? '', { measured: my.n, estimated: ey.n });
       continue;
     }
-    const cur = t.currency ?? '';
+    if (!/monthly/i.test(row.label)) continue;
+    const m = readAmount(row.money.measured);
+    const e = readAmount(row.money.estimated);
+    if (m.unparsed) unparsed += 1;
+    if (e.unparsed) unparsed += 1;
+    if (m.n === 0 && e.n === 0) continue;
+    const cur = row.money.currency ?? '';
     const bucket = acc.get(cur) ?? { measured: 0, estimated: 0 };
     bucket.measured += m.n;
     bucket.estimated += e.n;
     acc.set(cur, bucket);
-    contributing += 1;
   }
-
-  if (contributing === 0) return null;
+  if (acc.size === 0) return null;
 
   const lines = [...acc.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
@@ -383,11 +396,20 @@ export function runRate(findings: readonly Finding[]): RunRate | null {
       measured: v.measured,
       estimated: v.estimated,
       monthly: figure(currency, v.measured, v.estimated),
-      yearly: figure(currency, v.measured * 12, v.estimated * 12),
+      yearly: (() => {
+        const y = yearly.get(currency);
+        return y
+          ? figure(currency, y.measured, y.estimated)
+          : figure(currency, v.measured * 12, v.estimated * 12);
+      })(),
     }));
 
-  return { lines, findings: contributing, unparsed };
+  return { lines, findings: 1, unparsed };
 }
+
+/** The one cost finding whose figure is the estate rather than a slice of it. */
+const RUN_RATE_ID = 'cost.run-rate';
+
 
 /* ---------- public addresses ---------- */
 
