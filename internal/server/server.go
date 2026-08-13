@@ -18,7 +18,9 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/cost"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/metrics"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/pricing"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/telemetry"
 )
 
@@ -32,6 +34,20 @@ type Config struct {
 	MaxConcurrency int
 	IncludeRaw     bool
 	ShutdownGrace  time.Duration
+
+	// Cost turns on per-asset cost annotation for every audit the server
+	// serves: the SSE stream, the exports, and anything downstream of them
+	// then carry the cost.* tags. Off by default, so a plain server is
+	// byte-identical to one built before the feature existed.
+	//
+	// Only the streaming half is available here. Kubernetes pod attribution
+	// and per-seat rollups need the whole set at once, which is why they live
+	// in `auditor cost` — see the internal/cost package doc.
+	Cost bool
+
+	// PriceBook is an optional path to a price book that overrides the
+	// embedded default. Empty means "the embedded book".
+	PriceBook string
 
 	// Providers scopes what a request that names no providers will run.
 	// Empty means "every registered provider", which is the historical
@@ -50,6 +66,11 @@ type Config struct {
 type Server struct {
 	cfg Config
 	mux *http.ServeMux
+
+	// estimator is non-nil only when Config.Cost is set. Built once at
+	// startup rather than per request: loading and validating the price book
+	// on every audit would repeat the same disk read and the same failure.
+	estimator *cost.Estimator
 
 	// patterns records every route passed to handle/handleFunc, in
 	// registration order. Used by the openapi sync test; not part of the
@@ -74,6 +95,15 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	if cfg.Cost {
+		// Fail at startup, not per request. A bad --price-book should stop the
+		// server coming up, not produce audits that are silently uncosted.
+		book, err := loadPriceBook(cfg.PriceBook)
+		if err != nil {
+			return nil, err
+		}
+		s.estimator = cost.New(book)
+	}
 	s.routes()
 	return s, nil
 }
@@ -180,6 +210,15 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/yaml")
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	_, _ = w.Write(OpenAPISpec)
+}
+
+// loadPriceBook returns the embedded book, or the embedded book with the
+// operator's overrides merged over it when a path is given.
+func loadPriceBook(path string) (*pricing.Book, error) {
+	if path == "" {
+		return pricing.Default()
+	}
+	return pricing.LoadFile(path)
 }
 
 func validateAuth(cfg Config) error {

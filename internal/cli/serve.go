@@ -43,6 +43,10 @@ providers to run via the API but cannot supply new credentials.`,
 				MaxConcurrency: v.GetInt("max-concurrency"),
 				IncludeRaw:     v.GetBool("include-raw"),
 				Providers:      serveProviders(v.GetStringSlice("provider")),
+				// A price book given without --cost is a request for costing
+				// that would otherwise be silently ignored.
+				Cost:      v.GetBool("cost") || v.GetString("price-book") != "",
+				PriceBook: v.GetString("price-book"),
 			}
 
 			srv, err := server.New(cfg)
@@ -64,6 +68,8 @@ providers to run via the API but cannot supply new credentials.`,
 		"scope requests that name no providers to this set (default: all registered; --demo implies demo)")
 	cmd.Flags().Int("max-concurrency", 5, "per-provider parallelism (mirrors `audit --max-concurrency`)")
 	cmd.Flags().Bool("include-raw", false, "include full provider payload in Asset.Raw for both SSE and export")
+	cmd.Flags().Bool("cost", false, "annotate every asset with a cost.* estimate (list price; see `auditor cost`)")
+	cmd.Flags().String("price-book", "", "price book overriding the embedded default (implies --cost)")
 	return cmd
 }
 

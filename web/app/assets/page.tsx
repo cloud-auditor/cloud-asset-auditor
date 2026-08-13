@@ -13,8 +13,9 @@ import { AssetIcon, Icon } from '@/lib/icons';
 import type { Asset } from '@/lib/types';
 import './assets.css';
 import { fmtCount } from '@/lib/format';
+import { BASIS_HELP, assetCost, costLabel, hasCost } from '@/lib/cost';
 
-type ColKey = 'provider' | 'type' | 'name' | 'region' | 'account_id' | 'status' | 'address';
+type ColKey = 'provider' | 'type' | 'name' | 'region' | 'account_id' | 'status' | 'address' | 'cost';
 type SortKey = Exclude<ColKey, 'address'>;
 type FacetKey = 'provider' | 'type' | 'region' | 'status';
 type Density = 'comfortable' | 'compact';
@@ -27,6 +28,7 @@ const COLUMNS: readonly (VirtualColumn & { key: ColKey })[] = [
   { key: 'account_id', label: 'Account', width: 'minmax(112px, 0.85fr)', sortable: true },
   { key: 'status', label: 'Status', width: 'minmax(104px, 0.7fr)', sortable: true },
   { key: 'address', label: 'Address', width: 'minmax(128px, 1fr)' },
+  { key: 'cost', label: 'Cost / mo', width: 'minmax(104px, 0.7fr)', sortable: true },
 ];
 
 const FACETS: readonly { key: FacetKey; label: string }[] = [
@@ -91,7 +93,7 @@ function facetValue(a: Asset, k: FacetKey): string {
   }
 }
 
-function sortValue(a: Asset, k: SortKey): string {
+function sortValue(a: Asset, k: Exclude<SortKey, 'cost'>): string {
   switch (k) {
     case 'provider':
       return a.provider;
@@ -266,11 +268,24 @@ export default function AssetsPage() {
   const sorted = useMemo(() => {
     const out = streamed.slice();
     const dir = desc ? -1 : 1;
-    out.sort(
-      (a, b) =>
-        dir * COLLATOR.compare(sortValue(a, sort), sortValue(b, sort)) ||
-        COLLATOR.compare(a.id, b.id),
-    );
+    // Cost sorts numerically, not by collation: "~9.00" collates above
+    // "~10.00", which would put the cheapest row at the top of a descending
+    // "most expensive" sort — the exact question the column exists to answer.
+    // Unpriced rows sort last in BOTH directions rather than being treated as
+    // zero, so "cheapest first" never opens with 490 resources whose cost is
+    // simply unknown.
+    const cmp =
+      sort === 'cost'
+        ? (a: Asset, b: Asset) => {
+            const x = assetCost(a)?.amount;
+            const y = assetCost(b)?.amount;
+            if (x === undefined && y === undefined) return 0;
+            if (x === undefined) return 1;
+            if (y === undefined) return -1;
+            return dir * (x - y);
+          }
+        : (a: Asset, b: Asset) => dir * COLLATOR.compare(sortValue(a, sort), sortValue(b, sort));
+    out.sort((a, b) => cmp(a, b) || COLLATOR.compare(a.id, b.id));
     return out;
   }, [streamed, sort, desc]);
 
@@ -319,7 +334,13 @@ export default function AssetsPage() {
     return out;
   }, [sorted, filters, query]);
 
-  const visible = useMemo(() => COLUMNS.filter((c) => !hidden.includes(c.key)), [hidden]);
+  // Cost is off unless the server was started with --cost, and a Cost column
+  // that is "—" on every row is worse than no column at all.
+  const costed = useMemo(() => hasCost(assets), [assets]);
+  const visible = useMemo(
+    () => COLUMNS.filter((c) => !hidden.includes(c.key) && (c.key !== 'cost' || costed)),
+    [hidden, costed],
+  );
 
   // Read `sort` from the closure rather than from a setState updater: strict
   // mode invokes updaters twice, and a second setDesc inside one would toggle
@@ -651,6 +672,29 @@ function Cell({ col, asset, dense }: { col: ColKey; asset: Asset; dense: boolean
           <span className="pill assets-status" style={{ color: toneColor(statusTone(asset.status)) }}>
             <span className="dot" />
             <span className="truncate">{asset.status}</span>
+          </span>
+        </div>
+      );
+    }
+    case 'cost': {
+      const c = assetCost(asset);
+      if (!c) {
+        return (
+          <div role="gridcell" className="acell">
+            <span className="faint">—</span>
+          </div>
+        );
+      }
+      // Unpriced never renders as a figure: "metered" and "unknown" are shown
+      // as words, dimmed, so they cannot be mistaken for zero. See lib/cost.ts.
+      const priced = c.amount !== undefined;
+      return (
+        <div role="gridcell" className="acell">
+          <span
+            className={priced ? 'mono assets-cost' : 'mono faint assets-cost'}
+            title={c.detail ? `${BASIS_HELP[c.basis]}\n\n${c.detail}` : BASIS_HELP[c.basis]}
+          >
+            {costLabel(c)}
           </span>
         </div>
       );

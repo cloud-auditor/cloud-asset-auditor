@@ -72,6 +72,14 @@ func (s *Server) runProviders(ctx context.Context, names []string, opts reqOptio
 		close(e)
 		parentSpan.End()
 	}()
+
+	// Cost annotation is a streaming stage, so it sits between the fan-in and
+	// the caller rather than buffering anything: every consumer downstream —
+	// the SSE stream, the exports, the topology builders — sees the cost.*
+	// tags without knowing the stage exists.
+	if s.estimator != nil {
+		return s.estimator.Annotate(ctx, a), e, initErrors
+	}
 	return a, e, initErrors
 }
 

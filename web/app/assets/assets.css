@@ -428,3 +428,35 @@
   .asset-tag { grid-template-columns: 1fr; }
   .asset-tag .asset-tag-k { border-right: 0; border-bottom: 1px solid var(--border); }
 }
+
+/* Cost cell. Right-aligned so figures line up down the column, and tabular so
+   they do not shimmy as a stream re-prices. Unpriced values are words, not
+   numbers, and are dimmed by the `faint` class the cell adds. */
+.assets-cost {
+  display: block;
+  width: 100%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+/* Cost block in the detail drawer. The figure leads; the basis and the
+   estimator's working sit under it, because a number without its provenance
+   is the thing this feature is careful not to ship. */
+.drawer-cost-figure {
+  margin: 0 0 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: var(--fs-lg);
+}
+.drawer-cost-detail {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  word-break: break-word;
+}

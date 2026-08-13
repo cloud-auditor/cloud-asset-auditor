@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 import { useAudit } from './AuditProvider';
 import { JsonView, copyText, stringify } from './JsonView';
 import { providerColor, statusTone, toneColor } from '@/lib/colors';
+import { BASIS_HELP, assetCost, costLabel } from '@/lib/cost';
 import { AssetIcon, Icon } from '@/lib/icons';
 import type { Asset } from '@/lib/types';
 
@@ -84,6 +85,7 @@ export function AssetDrawer({ asset, onClose, onFilterTag, returnFocus }: AssetD
 
   const tags = Object.entries(asset.tags ?? {}).sort(([a], [b]) => a.localeCompare(b));
   const tone = statusTone(asset.status);
+  const cost = assetCost(asset);
 
   return (
     <>
@@ -150,6 +152,27 @@ export function AssetDrawer({ asset, onClose, onFilterTag, returnFocus }: AssetD
             <Field label="Created" value={asset.created_at} />
             <Field label="Address" value={assetAddress(asset)} mono />
           </dl>
+
+          {cost && (
+            <section className="asset-section drawer-cost">
+              <h3>Estimated cost</h3>
+              <p className="drawer-cost-figure">
+                <span className={cost.amount !== undefined ? 'mono' : 'mono faint'}>
+                  {costLabel(cost)}
+                </span>
+                {cost.amount !== undefined && <span className="hint"> / month</span>}
+                <span className="chip" style={{ marginLeft: 8 }}>
+                  {cost.basis}
+                </span>
+              </p>
+              {/* The basis is the whole point: "estimated at list price from
+                  this resource's own attributes" and "no rule matched, so we
+                  do not know" are very different claims, and a figure on a
+                  screen erases the difference unless the UI states it. */}
+              <p className="hint">{BASIS_HELP[cost.basis]}</p>
+              {cost.detail && <p className="hint mono drawer-cost-detail">{cost.detail}</p>}
+            </section>
+          )}
 
           <section className="asset-section">
             <h3>
