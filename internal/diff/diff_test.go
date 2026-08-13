@@ -3,11 +3,14 @@ package diff
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/cost"
 )
 
 // mkAsset builds a minimal asset; tests mutate copies for the "after" side.
@@ -153,6 +156,75 @@ func TestCompute(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestDiff_IgnoresCostTags guards the `audit --cost` integration: cost.* tags
+// are computed by this tool from a price book, not read from the provider, so
+// they move whenever the book's vintage or the flags do. If they were diffed,
+// re-pricing an unchanged tenancy would report drift on every single asset and
+// `auditor diff` would be useless the moment anyone enabled cost.
+func TestDiff_IgnoresCostTags(t *testing.T) {
+	before := mkAsset("oci", "oci.compute.instance", "ocid1.instance.a", "web-1")
+	before.Tags = map[string]string{
+		"env":           "prod",
+		"cost.monthly":  "~29.20",
+		"cost.currency": "USD",
+		"cost.basis":    "assumed",
+		"cost.detail":   "B92306×1 OCPU-hr @0.025 (730h/mo, marginal tier)",
+	}
+
+	// Same infrastructure, re-priced against a newer book: every cost tag
+	// changes, one appears, one disappears. None of it is drift.
+	after := before
+	after.Tags = map[string]string{
+		"env":          "prod",
+		"cost.monthly": "~31.39",
+		"cost.basis":   "inferred",
+		"cost.detail":  "B92306×1 OCPU-hr @0.0269 (730h/mo, marginal tier)",
+		"cost.vintage": "2027-01-04",
+	}
+
+	if res := Compute([]core.Asset{before}, []core.Asset{after}); !res.Empty() {
+		t.Errorf("cost tags reported as drift: %+v", res.Changed)
+	}
+
+	// The skip must be scoped to the prefix, not to "anything containing
+	// cost": a user's own cost-allocation tags are real infrastructure
+	// metadata and losing them would hide the tagging drift that FinOps
+	// allocation depends on.
+	realDrift := before
+	realDrift.Tags = maps.Clone(before.Tags)
+	realDrift.Tags["cost-center"] = "eng-42"
+	realDrift.Tags["costcenter"] = "eng-42"
+
+	res := Compute([]core.Asset{before}, []core.Asset{realDrift})
+	if len(res.Changed) != 1 {
+		t.Fatalf("Changed count = %d, want 1", len(res.Changed))
+	}
+	want := []FieldChange{
+		{Field: "tags.cost-center", Old: "", New: "eng-42"},
+		{Field: "tags.costcenter", Old: "", New: "eng-42"},
+	}
+	if !slices.Equal(res.Changed[0].Fields, want) {
+		t.Errorf("Fields = %+v, want %+v", res.Changed[0].Fields, want)
+	}
+}
+
+// TestDiff_CostTagPrefixMatchesAnnotator pins the two ends of the guard rail
+// together. internal/diff deliberately does not import internal/cost in
+// production code — that would drag the embedded price books in for one string
+// — so the constants are duplicated, and this test is what stops the copy from
+// drifting. If the annotator renames its namespace, this fails rather than the
+// skip silently ceasing to match.
+func TestDiff_CostTagPrefixMatchesAnnotator(t *testing.T) {
+	if costTagPrefix != cost.TagPrefix {
+		t.Errorf("costTagPrefix = %q, but cost.TagPrefix = %q", costTagPrefix, cost.TagPrefix)
+	}
+	for _, key := range []string{cost.TagMonthly, cost.TagCurrency, cost.TagBasis, cost.TagDetail} {
+		if !isDerivedTag(key) {
+			t.Errorf("annotator tag %q is not skipped by the diff", key)
+		}
 	}
 }
 

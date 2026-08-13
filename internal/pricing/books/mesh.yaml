@@ -1,0 +1,123 @@
+# Tailscale and NetBird are the one provider family where this tool has enough
+# data to compute a real number: both bill per user seat, and users are assets
+# it already collects. That arithmetic is a whole-set rollup and lives in
+# internal/cost, not in a per-asset rule — a seat price stamped on an individual
+# user asset would invite summing it alongside infrastructure cost, which is a
+# different kind of money.
+#
+# NetBird publishes in EUR and Tailscale in USD. No exchange rate is applied
+# anywhere in this tool, ever: a stale FX rate is a second invisible source of
+# wrongness layered on top of an estimate. The currency travels with the rate
+# and totals segregate by it.
+#
+# Hand-transcribed from the published pricing pages; see books[].source for the
+# URLs and books[].vintage for the date they were last read.
+version: 1
+books:
+    - id: mesh
+      source: https://tailscale.com/pricing , https://netbird.io/pricing
+      vintage: "2026-08-13"
+      note: hand-transcribed from the published plan tables. Neither vendor exposes which plan a tailnet or account is on, so `auditor cost` shows both tiers rather than picking one.
+rates:
+    - id: ts.seat.standard
+      book: mesh
+      unit: month
+      amount: 8
+      note: per user per month, Tailscale Standard. Unlimited user devices on every plan.
+    - id: ts.seat.premium
+      book: mesh
+      unit: month
+      amount: 18
+      note: per user per month, Tailscale Premium.
+    - id: ts.tagged_resource
+      book: mesh
+      unit: month
+      amount: 1
+      tier_note: the first 50 tagged resources are included on every plan; this is the marginal rate above that allowance. Like OCI's free tiers, the allowance is tailnet-wide, so a per-device estimate cannot know which side of it a device falls on.
+      note: per tagged resource per month — a device owned by an ACL tag rather than a user identity. This is Tailscale's only per-device charge.
+    - id: nb.seat.team
+      book: mesh
+      unit: month
+      amount: 6
+      currency: EUR
+      note: per user per month, NetBird Team. Includes 100 machines plus 10 per user.
+    - id: nb.seat.business
+      book: mesh
+      unit: month
+      amount: 12
+      currency: EUR
+      note: per user per month, NetBird Business. Same machine allowance as Team.
+    - id: nb.extra_machine
+      book: mesh
+      unit: month
+      amount: 0.5
+      currency: EUR
+      note: per machine per month beyond the included allowance (100 + 10 per user). Whether a given peer is over the line is an account-wide question, so this is a rollup rate, not a per-peer one.
+rules:
+    - type: tailscale.device
+      terms:
+        - rate: ts.tagged_resource
+          quantity:
+            literal: 1
+      condition:
+        tag: acl_tags
+        non_empty: true
+      else_basis: unpriceable
+      else_note: user devices are unlimited on every Tailscale plan; the money is per user seat, which is a whole-set rollup rather than anything attributable to this device.
+    - type: tailscale.user
+      basis: unknown
+      note: a seat costs $8/month on Standard or $18/month on Premium, and the API does not say which plan the tailnet is on. `auditor cost` reports both totals for the tailnet rather than stamping a guess on each user.
+    - type: tailscale.key
+      basis: unknown
+      note: auth keys and OAuth clients carry no charge; the devices they create do.
+    - type: tailscale.acl
+      basis: unknown
+      note: the policy file carries no charge.
+    - type: tailscale.acl_rule
+      basis: unknown
+      note: a policy rule carries no charge.
+    - type: tailscale.acl_group
+      basis: unknown
+      note: a policy group carries no charge; its members consume seats.
+    - type: tailscale.acl_tag
+      basis: unknown
+      note: a tag definition carries no charge; devices owned by the tag are billed as tagged resources.
+    - type: tailscale.acl_host
+      basis: unknown
+      note: a host alias carries no charge.
+    - type: tailscale.dns
+      basis: unknown
+      note: MagicDNS and nameserver configuration carry no charge.
+    - type: netbird.user
+      basis: unknown
+      note: a seat costs EUR 6/month on Team or EUR 12/month on Business, and the API does not say which plan the account is on. `auditor cost` reports both totals rather than stamping a guess on each user.
+    - type: netbird.peer
+      basis: unknown
+      note: machines are included up to 100 plus 10 per user; only peers beyond that allowance cost EUR 0.50/month each. Whether this peer is one of them is an account-wide question, answered in the rollup.
+    - type: netbird.account
+      basis: unknown
+      note: an account is the billing container, not a billable resource. Its seat and machine totals are reported in the mesh rollup.
+    - type: netbird.group
+      basis: unknown
+      note: a group carries no charge.
+    - type: netbird.policy
+      basis: unknown
+      note: an access policy carries no charge.
+    - type: netbird.policy_rule
+      basis: unknown
+      note: a policy rule carries no charge.
+    - type: netbird.setup_key
+      basis: unknown
+      note: a setup key carries no charge; the peers it enrols count against the machine allowance.
+    - type: netbird.route
+      basis: unknown
+      note: a network route carries no charge.
+    - type: netbird.nameserver
+      basis: unknown
+      note: a nameserver group carries no charge.
+    - type: netbird.network
+      basis: unknown
+      note: a network carries no charge.
+    - type: netbird.posture_check
+      basis: unknown
+      note: a posture check carries no charge.

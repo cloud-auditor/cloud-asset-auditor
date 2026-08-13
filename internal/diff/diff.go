@@ -13,7 +13,8 @@
 // — and its payload churns on fields nobody treats as drift (etags,
 // timestamps). CreatedAt is excluded because it's immutable-ish: a creation
 // time that "changes" almost always means the resource was deleted and
-// recreated, which the ID change already surfaces as remove + add.
+// recreated, which the ID change already surfaces as remove + add. Tags in
+// the reserved "cost." namespace are excluded too — see isDerivedTag.
 package diff
 
 import (
@@ -25,6 +26,7 @@ import (
 	"io"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
 )
@@ -153,9 +155,28 @@ func diffFields(before, after core.Asset) []FieldChange {
 		tagKeys[k] = struct{}{}
 	}
 	for _, k := range slices.Sorted(maps.Keys(tagKeys)) {
+		if isDerivedTag(k) {
+			continue
+		}
 		record("tags."+k, before.Tags[k], after.Tags[k])
 	}
 	return fields
+}
+
+// costTagPrefix namespaces the tags stamped by `audit --cost`
+// (internal/cost). They are not attributes of the resource.
+const costTagPrefix = "cost."
+
+// isDerivedTag reports whether a tag key was computed by this tool rather
+// than read from the provider. Such tags are excluded from the diff for the
+// same reason Raw is: they vary with the flags and the price-book vintage of
+// the run, not with the infrastructure. A re-priced but otherwise unchanged
+// tenancy would otherwise report drift on literally every asset — and a
+// snapshot taken with --cost would diff as fully changed against one taken
+// without it, which would make `auditor diff` useless the moment anyone
+// enabled cost.
+func isDerivedTag(key string) bool {
+	return strings.HasPrefix(key, costTagPrefix)
 }
 
 // Load reads one audit snapshot from r, accepting both shapes that

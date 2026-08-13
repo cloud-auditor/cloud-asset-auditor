@@ -1,0 +1,103 @@
+# Cloudflare publishes no pricing API, so every number here is hand-transcribed
+# from a published page, with the URL in books[].source and the date a human
+# last read it in books[].vintage. That makes this the book most likely to go
+# quietly stale — re-check it when the vintage looks old.
+#
+# Almost every Cloudflare product this tool inventories bills per request, per
+# operation, or per row. Those figures live in rule notes rather than as rates:
+# a rate is a scalar per hour or per month, and "$4.50 per million Class A
+# operations" is neither. The rates below are only the per-month scalars, and
+# none of them is wired to a rule — the plan or seat count that would make them
+# applicable is not exposed by the APIs this tool calls.
+version: 1
+books:
+    - id: cloudflare
+      source: https://www.cloudflare.com/plans/ , https://developers.cloudflare.com/workers/platform/pricing/ , https://developers.cloudflare.com/r2/pricing/ , https://developers.cloudflare.com/d1/platform/pricing/ , https://www.cloudflare.com/zero-trust/products/access/
+      vintage: "2026-08-13"
+      note: hand-transcribed; Cloudflare publishes no pricing API. Each page above was read on the vintage date.
+rates:
+    - id: cf.zone.pro
+      book: cloudflare
+      unit: month
+      amount: 20
+      note: per zone, billed annually ($25/mo billed monthly). Rate-card only — the API this tool calls does not expose a zone's plan.
+    - id: cf.zone.business
+      book: cloudflare
+      unit: month
+      amount: 200
+      note: per zone, billed annually ($250/mo billed monthly). Rate-card only — see cf.zone.pro.
+    - id: cf.acm
+      book: cloudflare
+      unit: month
+      amount: 10
+      note: Advanced Certificate Manager, per zone. Rate-card only — a certificate pack does not report whether ACM is enabled.
+    - id: cf.access.seat
+      book: cloudflare
+      unit: month
+      amount: 7
+      tier_note: Zero Trust pay-as-you-go, billed annually; the first 50 users are free, so this is the marginal seat.
+      note: per user. Rate-card only — this tool does not collect Cloudflare Zero Trust users, so there is no seat count to multiply.
+    - id: cf.r2.storage
+      book: cloudflare
+      unit: month
+      amount: 0.015
+      note: R2 Standard, per GB stored per month. Rate-card only — a bucket asset does not know its size.
+    - id: cf.kv.storage
+      book: cloudflare
+      unit: month
+      amount: 0.5
+      note: Workers KV, per GB stored per month beyond the first GB. Rate-card only.
+    - id: cf.d1.storage
+      book: cloudflare
+      unit: month
+      amount: 0.75
+      note: D1, per GB stored per month beyond the first 5 GB. Rate-card only.
+rules:
+    - type: cloudflare.r2_bucket
+      basis: unpriceable
+      note: '$0.015/GB-month stored, $4.50 per million Class A operations, $0.36 per million Class B operations; egress is free. Storage size and operation counts are consumption — an inventory sees only that the bucket exists.'
+    - type: cloudflare.worker_script
+      basis: unpriceable
+      note: Workers Paid is $5/month per ACCOUNT (10M requests and 30M CPU-ms included), then $0.30 per million requests and $0.02 per million CPU-ms. A per-script cost is not a thing Cloudflare bills.
+    - type: cloudflare.kv_namespace
+      basis: unpriceable
+      note: 'billed on operations plus stored data: reads $0.50/million beyond 10M, writes/deletes/lists $5.00/million beyond 1M, storage $0.50/GB-month beyond 1 GB. All consumption.'
+    - type: cloudflare.d1_database
+      basis: unpriceable
+      note: 'billed on rows: $0.001 per million rows read beyond 25B, $1.00 per million rows written beyond 50M, plus $0.75/GB-month beyond 5 GB. All consumption.'
+    - type: cloudflare.pages_project
+      basis: unpriceable
+      note: Pages builds are limited per month rather than metered on the Free plan, and Pages Functions bill as Workers requests against the account's $5/month minimum. Neither is derivable from the project.
+    - type: cloudflare.zone
+      basis: unknown
+      note: a zone's plan (Free $0, Pro $20/mo, Business $200/mo, Enterprise custom — all billed annually) decides the cost, and the API this tool calls does not expose it. See rates cf.zone.pro and cf.zone.business.
+    - type: cloudflare.load_balancer
+      basis: unknown
+      note: Cloudflare publishes only "starting at $5/mo" for Load Balancing, with the real figure depending on origins, health checks and geo steering. There is no number here worth quoting.
+    - type: cloudflare.certificate_pack
+      basis: unknown
+      note: universal certificates are free; Advanced Certificate Manager is $10/mo per zone (rate cf.acm). The pack does not report which it is.
+    - type: cloudflare.custom_certificate
+      basis: unknown
+      note: custom certificate upload is a Business/Enterprise entitlement, priced into the zone plan rather than per certificate.
+    - type: cloudflare.mtls_certificate
+      basis: unknown
+      note: mTLS certificates are part of the API Shield / Zero Trust entitlement, not separately metered.
+    - type: cloudflare.access_app
+      basis: unknown
+      note: Access is billed per user seat (rate cf.access.seat), not per application. This tool does not collect Zero Trust users, so there is no seat count to attribute.
+    - type: cloudflare.dns_record
+      basis: unknown
+      note: DNS records are included in every zone plan, including Free.
+    - type: cloudflare.tunnel
+      basis: unknown
+      note: Cloudflare Tunnel itself is free; connecting users consume Zero Trust seats, which are counted elsewhere.
+    - type: cloudflare.ruleset
+      basis: unknown
+      note: rulesets (WAF, transform, redirect) are entitlements of the zone plan, not separately metered.
+    - type: cloudflare.page_rule
+      basis: unknown
+      note: page rules are included in the zone plan; additional rules are sold in packs that the API does not report.
+    - type: cloudflare.account
+      basis: unknown
+      note: an account is an organisational container. Account-level charges (Workers Paid, Zero Trust seats) attach to it but are not derivable from it.

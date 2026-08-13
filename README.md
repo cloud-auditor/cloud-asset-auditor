@@ -414,8 +414,55 @@ auditor diff -o json monday.json friday.json | jq .summary
 auditor diff --exit-code monday.json friday.json
 ```
 
-Identity is `(provider, id)`; `Raw` and `CreatedAt` are deliberately
-excluded from comparison (opt-in noise / immutable-ish).
+Identity is `(provider, id)`; `Raw`, `CreatedAt`, and the `cost.*` tags are
+deliberately excluded from comparison (opt-in noise / immutable-ish /
+computed by this tool rather than read from the provider).
+
+## Cost estimation
+
+`auditor cost` prices the inventory against a public list-price book and
+reports the total, the biggest line items, and — just as importantly —
+everything it could not price:
+
+```bash
+auditor cost                                    # live audit, table report
+auditor cost --provider oci --group-by region
+auditor cost --from-snapshot assets.json -o json
+auditor cost --rates                            # print the price book; no audit, no credentials
+auditor cost --top 0 --show-unpriced            # every asset, priced or not
+
+# Per-asset annotation on any audit: four cost.* tags on every asset, so they
+# flow into JSON, CSV, the XLSX tag columns, the HTML report, and /api/v1/audit.
+auditor audit --cost -o xlsx --output-file inventory.xlsx
+auditor audit --cost -o json | jq '.[] | select(.tags["cost.basis"] == "unknown")'
+```
+
+### What this is not
+
+**It is a list-price estimate, not an invoice, and it will not match your
+bill.** A leading `~` means this tool computed the number from a price book; a
+number without one came from the provider's own billing API. It is the one
+disclosure that survives a copy-paste, a screenshot, and a CSV.
+
+Not accounted for: your negotiated rate, committed-use discounts, **free-tier
+allowances** (they are tenancy-wide monthly tiers, so every rate in the book is
+the *marginal* rate — this tool over-estimates small tenancies), egress,
+request- and consumption-based charges, support, and taxes. EUR (NetBird) and
+USD are reported separately and never combined; no exchange rate is applied
+anywhere in this tool.
+
+**Nothing unpriced is ever reported as `0`.** Consumption-billed resources read
+`metered`, resources with no rule read `unknown`, and the only path to `0.00`
+is a stopped instance — which always carries the explanation. `$0.00` is a real
+price in OCI's feed (an Always Free tier), so zero and unknown have to be
+impossible to confuse.
+
+There is **no `--exit-code` and no budget gate**, deliberately: failing a
+pipeline on an estimate teaches people the estimate is authoritative. Gate on
+`reach --exposed` and `diff`, which are statements of fact.
+
+Full flag surface, the `cost.*` tag schema, and the price-book override format
+are in [`docs/configuration.md`](./docs/configuration.md#auditor-cost).
 
 ### Reusable composite action
 

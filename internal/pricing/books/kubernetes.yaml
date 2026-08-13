@@ -1,0 +1,50 @@
+# Kubernetes has no prices of its own — a cluster costs whatever its nodes cost
+# on the cloud underneath. The rates here are the last-resort fallback for a
+# node this tool cannot join to a real instance, and they are NOT your cloud's
+# prices: they are OpenCost's published defaults, which are GCP us-central1
+# figures. Anything priced from them is `assumed`, and cost.detail says so.
+#
+# Node rate resolution, best first (implemented in internal/cost/kube.go):
+#   1. spec.providerID names an OCI instance that is also in this audit — use
+#      that instance's own estimate. Common, because OKE and OCI are audited
+#      together, and it is the only branch that reflects real prices.
+#   2. the node.kubernetes.io/instance-type label resolves in shapes.oci.
+#   3. neither — these rates, marked assumed.
+#
+# There are no rules for the hundreds of other GVRs Kubernetes discovery
+# returns. That is deliberate: almost none of them are billable, the set is
+# open-ended (every CRD in the cluster), and a rule per type would be a
+# maintenance treadmill that says "not billable" several hundred times. They
+# resolve to unknown, which for Kubernetes is the correct and expected answer.
+version: 1
+books:
+    - id: kubernetes
+      source: https://github.com/opencost/opencost/blob/develop/configs/default.json
+      vintage: "2026-08-13"
+      note: OpenCost's default.json, described upstream as "Default prices based on GCP us-central1". Transcribed verbatim on the vintage date. A generic baseline, not any particular cloud's list price.
+rates:
+    - id: k8s.fallback.cpu
+      book: kubernetes
+      unit: hour
+      amount: 0.031611
+      note: per CPU core per hour. Generic fallback — not your cloud's price.
+    - id: k8s.fallback.ram
+      book: kubernetes
+      unit: hour
+      amount: 0.004237
+      note: per GB of memory per hour. Generic fallback — not your cloud's price.
+    - id: k8s.fallback.gpu
+      book: kubernetes
+      unit: hour
+      amount: 0.95
+      note: per GPU per hour. Generic fallback, and a very rough one — GPU prices vary by more than an order of magnitude across accelerator types.
+rules:
+    - type: v1.Node
+      basis: unknown
+      note: a node's cost comes from the instance underneath it, resolved by `auditor cost` — by joining spec.providerID to an OCI instance in the same audit, then by instance-type label, then by the generic fallback rates in this book. That join needs the whole asset set, so `audit --cost` cannot do it.
+    - type: v1.Pod
+      basis: unknown
+      note: pod cost is an attribution of its node's cost in proportion to resources.requests, computed by `auditor cost` with --include-raw. It is never additional spend, so it is never summed with node cost. Without the full node set and Raw requests there is no honest per-pod figure — dividing node cost by pod count would be wrong by an order of magnitude on any cluster with mixed pod sizes.
+    - type: v1.PersistentVolume
+      basis: unknown
+      note: a PV's cost belongs to the backing disk in the cloud provider's inventory — an OCI block volume, priced there. Pricing it here as well would double-count it.

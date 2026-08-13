@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/core"
+	"github.com/cloud-auditor/cloud-asset-auditor/internal/pricing"
 	"github.com/cloud-auditor/cloud-asset-auditor/internal/topology"
 )
 
@@ -432,6 +433,7 @@ func TestRootCommand_SubcommandsAndFlags(t *testing.T) {
 		"reach":    {"from", "to", "exposed", "max-hops", "max-paths", "kinds", "include-deny", "exit-code", "from-snapshot"},
 		"diff":     {"output", "exit-code"},
 		"check":    {"rules", "exit-code", "fail-on"},
+		"cost":     {"output", "group-by", "top", "show-unpriced", "rates", "price-book", "hours-per-month", "refresh-prices", "from-snapshot", "filter"},
 		"serve":    {"addr"},
 		"cache":    nil,
 		"secrets":  nil,
@@ -479,6 +481,159 @@ func TestGraphCommands_ShareTheSameProviderFlags(t *testing.T) {
 			t.Errorf("reach is missing --%s", f)
 		}
 	}
+}
+
+// `cost` reads the same estate as `topology` and `reach`, so it goes through
+// addGraphSourceFlags too — including the forced --include-raw, without which
+// Kubernetes pods and untagged volumes silently price as unknown.
+func TestCostCmd_SharesTheGraphSourceFlags(t *testing.T) {
+	cost := findCmd(t, newRootCmd(), "cost")
+	for _, f := range []string{
+		"provider", "from-snapshot", "max-concurrency", "timeout",
+		"oci-profile", "oci-regions", "oci-compartments",
+		"kube-context", "kube-contexts", "kube-namespace",
+		"netbird-management-url", "gcp-scope", "gcp-project",
+		"tailscale-tailnet", "tailscale-api-url",
+	} {
+		if cost.Flags().Lookup(f) == nil {
+			t.Errorf("cost is missing --%s", f)
+		}
+	}
+}
+
+// No --exit-code and no budget threshold, deliberately: gating a pipeline on
+// an estimate teaches people the estimate is authoritative. If someone adds
+// one, this test is where the argument has to be had.
+func TestCostCmd_HasNoExitCodeGate(t *testing.T) {
+	cost := findCmd(t, newRootCmd(), "cost")
+	for _, f := range []string{"exit-code", "budget", "fail-on"} {
+		if cost.Flags().Lookup(f) != nil {
+			t.Errorf("cost registered --%s; cost figures are estimates and nothing may gate on them", f)
+		}
+	}
+}
+
+// `audit --cost` and `cost` must price identically, so the flags that choose
+// the prices are registered by one shared function. Two commands disagreeing
+// about what a resource costs is worse than neither reporting it.
+func TestCostFlags_ReachBothAuditAndCost(t *testing.T) {
+	root := newRootCmd()
+	audit, cost := findCmd(t, root, "audit"), findCmd(t, root, "cost")
+
+	for _, f := range []string{"price-book", "hours-per-month"} {
+		if audit.Flags().Lookup(f) == nil {
+			t.Errorf("audit is missing --%s", f)
+		}
+		if cost.Flags().Lookup(f) == nil {
+			t.Errorf("cost is missing --%s", f)
+		}
+	}
+	if audit.Flags().Lookup("cost") == nil {
+		t.Error("audit is missing --cost")
+	}
+
+	// Zero, not 730: the flag has to mean "override", so that a --price-book
+	// declaring hours_per_month: 744 isn't silently overwritten by a default
+	// the user never typed.
+	if got := cost.Flags().Lookup("hours-per-month").DefValue; got != "0" {
+		t.Errorf("--hours-per-month default = %q, want %q", got, "0")
+	}
+}
+
+// The off-by-default guarantee: with --cost unset there is no estimator, so
+// the asset stream is untouched and a plain audit stays byte-identical to one
+// produced before this feature existed.
+func TestNewAuditEstimator_NilUnlessCostIsSet(t *testing.T) {
+	v := viper.New()
+
+	est, err := newAuditEstimator(context.Background(), v)
+	if err != nil {
+		t.Fatalf("newAuditEstimator: %v", err)
+	}
+	if est != nil {
+		t.Error("estimator is non-nil with --cost unset")
+	}
+
+	v.Set("cost", true)
+	est, err = newAuditEstimator(context.Background(), v)
+	if err != nil {
+		t.Fatalf("newAuditEstimator with cost on: %v", err)
+	}
+	if est == nil {
+		t.Fatal("estimator is nil with --cost set")
+	}
+}
+
+func TestLoadPriceBook(t *testing.T) {
+	t.Run("defaults to the embedded book", func(t *testing.T) {
+		book, err := loadPriceBook(context.Background(), viper.New())
+		if err != nil {
+			t.Fatalf("loadPriceBook: %v", err)
+		}
+		if len(book.Rates) == 0 || len(book.Rules) == 0 {
+			t.Fatalf("embedded book is empty: %d rates, %d rules", len(book.Rates), len(book.Rules))
+		}
+		if book.HoursPerMonth != pricing.DefaultHoursPerMonth {
+			t.Errorf("HoursPerMonth = %v, want %v", book.HoursPerMonth, pricing.DefaultHoursPerMonth)
+		}
+	})
+
+	t.Run("hours-per-month overrides only when set", func(t *testing.T) {
+		v := viper.New()
+		v.Set("hours-per-month", 744.0)
+		book, err := loadPriceBook(context.Background(), v)
+		if err != nil {
+			t.Fatalf("loadPriceBook: %v", err)
+		}
+		if book.HoursPerMonth != 744 {
+			t.Errorf("HoursPerMonth = %v, want 744", book.HoursPerMonth)
+		}
+	})
+
+	t.Run("rejects a negative month", func(t *testing.T) {
+		v := viper.New()
+		v.Set("hours-per-month", -1.0)
+		if _, err := loadPriceBook(context.Background(), v); err == nil {
+			t.Fatal("expected an error for a negative --hours-per-month")
+		}
+	})
+
+	t.Run("reports a missing price book by path", func(t *testing.T) {
+		v := viper.New()
+		v.Set("price-book", []string{filepath.Join(t.TempDir(), "absent.yaml")})
+		_, err := loadPriceBook(context.Background(), v)
+		if err == nil {
+			t.Fatal("expected an error for a missing --price-book")
+		}
+		if !strings.Contains(err.Error(), "absent.yaml") {
+			t.Errorf("error should name the file: %v", err)
+		}
+	})
+
+	t.Run("merges an override over the built-in book", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "override.yaml")
+		// Replaces one built-in rate by id; everything unmentioned survives.
+		const override = "version: 1\nrates:\n  - {id: oci.block.storage, book: oci, sku: B91961, unit: month, amount: 0.9}\n"
+		if err := os.WriteFile(path, []byte(override), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		v := viper.New()
+		v.Set("price-book", []string{path})
+		book, err := loadPriceBook(context.Background(), v)
+		if err != nil {
+			t.Fatalf("loadPriceBook: %v", err)
+		}
+		rate, ok := book.Rate("oci.block.storage")
+		if !ok {
+			t.Fatal("oci.block.storage missing from the merged book")
+		}
+		if rate.Amount != 0.9 {
+			t.Errorf("amount = %v, want 0.9 (the override did not win)", rate.Amount)
+		}
+		if len(book.Rules) == 0 {
+			t.Error("override dropped the built-in rules; the merge is not additive")
+		}
+	})
 }
 
 // `reach` with no selector must explain itself rather than silently doing

@@ -25,8 +25,11 @@ func addGraphSourceFlags(cmd *cobra.Command) {
 	cmd.Flags().StringSlice("provider", nil,
 		`providers to run (default: all registered; use "none" to run zero)`)
 	cmd.Flags().String("from-snapshot", "",
-		"build the graph from a saved 'audit -o json' snapshot (array or NDJSON) instead of running a live audit")
-	cmd.Flags().Int("max-concurrency", 5, "per-provider parallelism (mirrors `audit`)")
+		"read assets from a saved 'audit -o json' snapshot (array or NDJSON) instead of running a live audit")
+	// Backticks are load-bearing to cobra — UnquoteUsage reads the first
+	// backticked word as the flag's type name, so "mirrors `audit`" renders as
+	// "--max-concurrency audit". Keep flag usage strings backtick-free.
+	cmd.Flags().Int("max-concurrency", 5, "per-provider parallelism (mirrors 'audit')")
 	cmd.Flags().Duration("timeout", 10*time.Minute, "overall audit + resolve timeout")
 
 	// Provider-scoped flags mirrored from `audit` so one invocation can target

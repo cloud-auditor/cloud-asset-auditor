@@ -165,3 +165,51 @@ web-verify:
         exit 1
     fi
     echo "embedded web UI is up to date."
+
+# ---------------------------------------------------------------------------
+# Price book (Oracle's public list prices → the embedded books/oci.yaml)
+# ---------------------------------------------------------------------------
+
+# internal/pricing/books/oci.yaml is COMMITTED and go:embed-ed, so `go build`,
+# CI, goreleaser and the Docker image never touch the network — the binary
+# prices exactly as well air-gapped as online, and says which day its numbers
+# are from. Run this after adding or changing a rate id, SKU or rule in that
+# file, and commit the regenerated book together with the recorded feed fixture
+# in internal/pricing/testdata/.
+#
+# Only rates[].amount, rates[].tier_note and books[].vintage are machine-written
+# — rules and shapes stay hand-curated, because a rule nobody wrote is a number
+# nobody can defend. Each amount is taken from the SKU's MARGINAL tier: Oracle
+# encodes Always Free allowances as a $0.00 first tier, and reading that one
+# reports your first load balancer as free forever.
+#
+# It fails on the first declared SKU the feed no longer carries, which is how a
+# renamed part number stops a release instead of decaying into a stale price.
+#
+# Re-price internal/pricing/books/oci.yaml from Oracle's public price list.
+prices:
+    go run internal/pricing/genoci.go
+    @echo "commit books/oci.yaml together with internal/pricing/testdata/oci-feed.json.gz"
+
+# Deliberately NOT a CI gate, unlike `just web-verify`. Oracle republishes the
+# feed on its own schedule, so gating pull requests on it would turn an
+# unrelated upstream price change into a red build on every open PR. The
+# deterministic check — that every committed amount really is the marginal tier
+# of the committed feed fixture — is TestPrices_UseMarginalTier, which already
+# runs offline in the `test` job.
+#
+# Run this from a scheduled job instead, and open a PR when it reports drift.
+#
+# Report whether Oracle's live prices have moved away from the committed book.
+prices-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    go run internal/pricing/genoci.go
+    if git diff --quiet -- internal/pricing/books internal/pricing/testdata; then
+        echo "price book matches Oracle's current feed."
+        exit 0
+    fi
+    echo "Oracle's feed has moved — review and commit:" >&2
+    git --no-pager diff --stat -- internal/pricing/books internal/pricing/testdata >&2
+    git --no-pager diff -- internal/pricing/books/oci.yaml >&2
+    exit 1

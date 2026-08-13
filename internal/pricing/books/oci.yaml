@@ -1,0 +1,408 @@
+# GENERATED FILE — rates[].amount, rates[].tier_note and books[].vintage are
+# rewritten by `just prices` from Oracle's public price list. Everything else
+# (rate ids, SKUs, units, shapes, rules, notes) is hand-curated: edit it here
+# and re-run `just prices` to re-price.
+#
+# Every amount is the MARGINAL tier — the price of the next unit, not the
+# first. Oracle encodes Always Free allowances as the first tier at $0.00, and a
+# per-asset estimator cannot know where a resource sits in a tenancy-wide
+# monthly tier. See internal/pricing/refresh.go, OCIProduct.MarginalPrice.
+version: 1
+currency: USD
+hours_per_month: 730
+books:
+    - id: oci
+      source: https://apexapps.oracle.com/pls/apex/cetools/api/v1/products/?currencyCode=USD
+      vintage: "2026-08-06T15:45:07.573Z"
+      generated_by: just prices
+      note: Oracle's public, unauthenticated price list. List price only — the feed carries no committed-use or Universal Credits tier, and no region dimension (OCI list pricing is globally uniform).
+rates:
+    - id: oci.compute.e2.ocpu
+      book: oci
+      sku: B90425
+      unit: hour
+      amount: 0.03
+      note: pre-Flex E2 family; memory is bundled into the OCPU SKU, so shapes on this rate carry no memory_rate.
+    - id: oci.compute.e3.ocpu
+      book: oci
+      sku: B92306
+      unit: hour
+      amount: 0.025
+    - id: oci.compute.e3.memory
+      book: oci
+      sku: B92307
+      unit: hour
+      amount: 0.0015
+    - id: oci.compute.e4.ocpu
+      book: oci
+      sku: B93113
+      unit: hour
+      amount: 0.025
+    - id: oci.compute.e4.memory
+      book: oci
+      sku: B93114
+      unit: hour
+      amount: 0.0015
+    - id: oci.compute.e5.ocpu
+      book: oci
+      sku: B97384
+      unit: hour
+      amount: 0.03
+    - id: oci.compute.e5.memory
+      book: oci
+      sku: B97385
+      unit: hour
+      amount: 0.002
+    - id: oci.compute.e6.ocpu
+      book: oci
+      sku: B111129
+      unit: hour
+      amount: 0.03
+    - id: oci.compute.e6.memory
+      book: oci
+      sku: B111130
+      unit: hour
+      amount: 0.002
+    - id: oci.compute.a1.ocpu
+      book: oci
+      sku: B93297
+      unit: hour
+      amount: 0.01
+      tier_note: 'tiered SKU: the first 3000 units of "OCPU Per Hour" bill at 0 (Always Free, tenancy-wide per month); this is the marginal rate above that allowance'
+    - id: oci.compute.a1.memory
+      book: oci
+      sku: B93298
+      unit: hour
+      amount: 0.0015
+      tier_note: 'tiered SKU: the first 18000 units of "Gigabyte Per Hour" bill at 0 (Always Free, tenancy-wide per month); this is the marginal rate above that allowance'
+    - id: oci.compute.a2.ocpu
+      book: oci
+      sku: B109529
+      unit: hour
+      amount: 0.014
+    - id: oci.compute.a2.memory
+      book: oci
+      sku: B109530
+      unit: hour
+      amount: 0.002
+    - id: oci.compute.x7.ocpu
+      book: oci
+      sku: B88514
+      unit: hour
+      amount: 0.0638
+      note: pre-Flex X7 family (VM.Standard2.*); memory is bundled into the OCPU SKU.
+    - id: oci.compute.x9.ocpu
+      book: oci
+      sku: B94176
+      unit: hour
+      amount: 0.04
+    - id: oci.compute.x9.memory
+      book: oci
+      sku: B94177
+      unit: hour
+      amount: 0.0015
+    - id: oci.compute.x9_optimized.ocpu
+      book: oci
+      sku: B93311
+      unit: hour
+      amount: 0.054
+    - id: oci.compute.x9_optimized.memory
+      book: oci
+      sku: B93312
+      unit: hour
+      amount: 0.0015
+    - id: oci.compute.dense_io.e4.ocpu
+      book: oci
+      sku: B93121
+      unit: hour
+      amount: 0.025
+    - id: oci.compute.dense_io.e4.memory
+      book: oci
+      sku: B93122
+      unit: hour
+      amount: 0.0015
+    - id: oci.compute.dense_io.e5.ocpu
+      book: oci
+      sku: B98202
+      unit: hour
+      amount: 0.03
+    - id: oci.compute.dense_io.e5.memory
+      book: oci
+      sku: B98203
+      unit: hour
+      amount: 0.002
+    - id: oci.block.storage
+      book: oci
+      sku: B91961
+      unit: month
+      amount: 0.0255
+      note: per GB per month.
+    - id: oci.block.vpu
+      book: oci
+      sku: B91962
+      unit: month
+      amount: 0.0017
+      note: per VPU per GB per month. 10 VPU/GB is the Balanced default, giving 0.0255 + 10x0.0017 = 0.0425/GB-month.
+    - id: oci.lb.base
+      book: oci
+      sku: B93030
+      unit: hour
+      amount: 0.0113
+      tier_note: 'tiered SKU: the first 744 units of "Load Balancer" bill at 0 (Always Free, tenancy-wide per month); this is the marginal rate above that allowance'
+    - id: oci.lb.bandwidth
+      book: oci
+      sku: B93031
+      unit: hour
+      amount: 0.0001
+      tier_note: 'tiered SKU: the first 7440 units of "Mbps Per Hour" bill at 0 (Always Free, tenancy-wide per month); this is the marginal rate above that allowance'
+      note: per Mbps-hour of configured bandwidth. Rate-card only — no rule uses it, because bandwidth is consumption and an inventory cannot see it.
+    - id: oci.oke.enhanced_cluster
+      book: oci
+      sku: B96545
+      unit: hour
+      amount: 0.1
+      note: per cluster per hour. Basic clusters have no control-plane charge.
+    - id: oci.vault.private
+      book: oci
+      sku: B90328
+      unit: hour
+      amount: 3.724
+      note: per Virtual Private Vault per hour. DEFAULT (shared) vaults have no hourly charge.
+    - id: oci.object_storage.storage
+      book: oci
+      sku: B91628
+      unit: month
+      amount: 0.0255
+      tier_note: 'tiered SKU: the first 10 units of "Gigabyte Storage Capacity Per Month" bill at 0 (Always Free, tenancy-wide per month); this is the marginal rate above that allowance'
+      note: per GB stored per month. Rate-card only — a bucket asset does not know how much is in it.
+    - id: oci.object_storage.requests
+      book: oci
+      sku: B91627
+      unit: month
+      amount: 0.0034
+      tier_note: 'tiered SKU: the first 5 units of "10,000 Requests per Month (first 50,000 free)" bill at 0 (Always Free, tenancy-wide per month); this is the marginal rate above that allowance'
+      note: per 10,000 requests per month. Rate-card only — request counts are consumption.
+shapes:
+    oci:
+        BM.Standard.A1.160:
+            ocpu_rate: oci.compute.a1.ocpu
+            memory_rate: oci.compute.a1.memory
+            default_ocpu: 160
+            default_memory_gb: 1024
+        VM.DenseIO.E4.Flex:
+            ocpu_rate: oci.compute.dense_io.e4.ocpu
+            memory_rate: oci.compute.dense_io.e4.memory
+            flexible: true
+            default_ocpu: 8
+            default_memory_gb: 128
+            note: NVMe capacity (B93123) is billed separately and is not modelled.
+        VM.DenseIO.E5.Flex:
+            ocpu_rate: oci.compute.dense_io.e5.ocpu
+            memory_rate: oci.compute.dense_io.e5.memory
+            flexible: true
+            default_ocpu: 8
+            default_memory_gb: 128
+            note: NVMe capacity (B98204) is billed separately and is not modelled.
+        VM.Optimized3.Flex:
+            ocpu_rate: oci.compute.x9_optimized.ocpu
+            memory_rate: oci.compute.x9_optimized.memory
+            flexible: true
+            default_ocpu: 1
+            default_memory_gb: 16
+        VM.Standard.A1.Flex:
+            ocpu_rate: oci.compute.a1.ocpu
+            memory_rate: oci.compute.a1.memory
+            flexible: true
+            default_ocpu: 1
+            default_memory_gb: 6
+        VM.Standard.A2.Flex:
+            ocpu_rate: oci.compute.a2.ocpu
+            memory_rate: oci.compute.a2.memory
+            flexible: true
+            default_ocpu: 1
+            default_memory_gb: 8
+        VM.Standard.E2.1:
+            ocpu_rate: oci.compute.e2.ocpu
+            default_ocpu: 1
+        VM.Standard.E2.1.Micro:
+            note: Always Free only — Oracle publishes no marginal on-demand rate for this shape, so there is no honest number to quote. Two per tenancy are free; a third cannot be created.
+        VM.Standard.E2.2:
+            ocpu_rate: oci.compute.e2.ocpu
+            default_ocpu: 2
+        VM.Standard.E2.4:
+            ocpu_rate: oci.compute.e2.ocpu
+            default_ocpu: 4
+        VM.Standard.E2.8:
+            ocpu_rate: oci.compute.e2.ocpu
+            default_ocpu: 8
+        VM.Standard.E3.Flex:
+            ocpu_rate: oci.compute.e3.ocpu
+            memory_rate: oci.compute.e3.memory
+            flexible: true
+            default_ocpu: 1
+            default_memory_gb: 16
+        VM.Standard.E4.Flex:
+            ocpu_rate: oci.compute.e4.ocpu
+            memory_rate: oci.compute.e4.memory
+            flexible: true
+            default_ocpu: 1
+            default_memory_gb: 16
+        VM.Standard.E5.Flex:
+            ocpu_rate: oci.compute.e5.ocpu
+            memory_rate: oci.compute.e5.memory
+            flexible: true
+            default_ocpu: 1
+            default_memory_gb: 12
+        VM.Standard.E6.Flex:
+            ocpu_rate: oci.compute.e6.ocpu
+            memory_rate: oci.compute.e6.memory
+            flexible: true
+            default_ocpu: 1
+            default_memory_gb: 12
+        VM.Standard2.1:
+            ocpu_rate: oci.compute.x7.ocpu
+            default_ocpu: 1
+        VM.Standard2.2:
+            ocpu_rate: oci.compute.x7.ocpu
+            default_ocpu: 2
+        VM.Standard2.4:
+            ocpu_rate: oci.compute.x7.ocpu
+            default_ocpu: 4
+        VM.Standard2.8:
+            ocpu_rate: oci.compute.x7.ocpu
+            default_ocpu: 8
+        VM.Standard2.16:
+            ocpu_rate: oci.compute.x7.ocpu
+            default_ocpu: 16
+        VM.Standard2.24:
+            ocpu_rate: oci.compute.x7.ocpu
+            default_ocpu: 24
+        VM.Standard3.Flex:
+            ocpu_rate: oci.compute.x9.ocpu
+            memory_rate: oci.compute.x9.memory
+            flexible: true
+            default_ocpu: 1
+            default_memory_gb: 16
+rules:
+    - type: oci.compute.instance
+      shape_from:
+        tag: shape
+      shape_table: oci
+      terms:
+        - rate:
+            from_shape: ocpu_rate
+          quantity:
+            tag: ocpus
+            raw: shapeConfig.ocpus
+            shape: default_ocpu
+        - rate:
+            from_shape: memory_rate
+          quantity:
+            tag: memory_gb
+            raw: shapeConfig.memoryInGBs
+            shape: default_memory_gb
+          optional: true
+      zero_when_status:
+        - STOPPED
+        - TERMINATED
+      zero_note: instance is stopped — OCPU and memory are not billed while it is; its boot volume still is.
+      unpriced_components:
+        - Windows OS licensing (B88318, per OCPU-hour) — the instance does not report whether its image is Windows.
+        - GPU and local NVMe SKUs on GPU and DenseIO shapes.
+    - type: oci.block_volume
+      terms:
+        - rate: oci.block.storage
+          quantity:
+            tag: size_gb
+            raw: sizeInGBs
+        - rate: oci.block.vpu
+          quantity:
+            tag: size_gb
+            raw: sizeInGBs
+            multiply_by:
+                tag: vpus_per_gb
+                raw: vpusPerGB
+                default: 10
+    - type: oci.boot_volume
+      terms:
+        - rate: oci.block.storage
+          quantity:
+            tag: size_gb
+            raw: sizeInGBs
+        - rate: oci.block.vpu
+          quantity:
+            tag: size_gb
+            raw: sizeInGBs
+            multiply_by:
+                tag: vpus_per_gb
+                raw: vpusPerGB
+                default: 10
+    - type: oci.load_balancer
+      terms:
+        - rate: oci.lb.base
+          quantity:
+            literal: 1
+      unpriced_components:
+        - Bandwidth (oci.lb.bandwidth, B93031) — Mbps-hours are consumption, not inventory.
+    - type: oci.oke.cluster
+      terms:
+        - rate: oci.oke.enhanced_cluster
+          quantity:
+            literal: 1
+      condition:
+        tag: cluster_type
+        equals: ENHANCED_CLUSTER
+      else_basis: unknown
+      else_note: a BASIC_CLUSTER control plane is free and an ENHANCED_CLUSTER is charged hourly; without a cluster_type tag the two are indistinguishable. Worker nodes bill as compute instances and are counted there.
+    - type: oci.vault
+      terms:
+        - rate: oci.vault.private
+          quantity:
+            literal: 1
+      condition:
+        tag: vault_type
+        equals: VIRTUAL_PRIVATE
+      else_basis: unknown
+      else_note: a DEFAULT or EXTERNAL vault has no hourly charge; its key versions bill monthly beyond the first 20 tenancy-wide, which the vault asset cannot see.
+    - type: oci.object_storage.bucket
+      basis: unpriceable
+      note: billed per GB-month stored (oci.object_storage.storage, B91628) plus per 10k requests (oci.object_storage.requests, B91627). An inventory knows the bucket exists, not what is in it or how often it is read.
+    - type: oci.network_load_balancer
+      basis: unpriceable
+      note: Oracle's price list has no SKU for the network load balancer itself — the object carries no charge. What you pay for is the traffic through it, which an inventory cannot see.
+    - type: oci.nat_gateway
+      basis: unpriceable
+      note: the gateway itself carries no charge; egress through it is billed as data transfer, which this tool does not model for any provider.
+    - type: oci.drg
+      basis: unpriceable
+      note: the DRG itself carries no charge; remote peering connections and the traffic across them are billed, and neither is visible from the DRG.
+    - type: oci.vcn
+      basis: unknown
+      note: no charge for the VCN object. Cost lives in what is attached to it — instances, load balancers, gateways.
+    - type: oci.subnet
+      basis: unknown
+      note: no charge for the subnet object.
+    - type: oci.internet_gateway
+      basis: unknown
+      note: no charge for the internet gateway object; egress through it is data transfer, which this tool does not model.
+    - type: oci.service_gateway
+      basis: unknown
+      note: no charge for the service gateway object. Traffic to OCI services through it is not billed as internet egress.
+    - type: oci.local_peering_gateway
+      basis: unknown
+      note: no charge for the local peering gateway object; traffic across a local peering within a region is not billed.
+    - type: oci.compartment
+      basis: unknown
+      note: a compartment is an organisational container, not a billable resource.
+    - type: oci.iam.user
+      basis: unknown
+      note: OCI does not charge per IAM user.
+    - type: oci.iam.group
+      basis: unknown
+      note: OCI does not charge per IAM group.
+    - type: oci.iam.policy
+      basis: unknown
+      note: OCI does not charge per IAM policy.
+    - type: oci.iam.dynamic_group
+      basis: unknown
+      note: OCI does not charge per dynamic group.

@@ -81,6 +81,15 @@ func newAuditCmd(s *cliState) *cobra.Command {
 				return errors.New("xlsx is a binary format: pass --output-file <path>.xlsx (or redirect stdout to a file)")
 			}
 
+			// nil unless --cost was passed. Resolved here, with the other
+			// validation and before openOutput truncates anything, so a broken
+			// --price-book costs a second rather than a ten-minute audit and
+			// the user's previous --output-file.
+			estimator, err := newAuditEstimator(cmd.Context(), v)
+			if err != nil {
+				return err
+			}
+
 			w, closeOut, err := openOutput(outFile)
 			if err != nil {
 				return err
@@ -89,6 +98,21 @@ func newAuditCmd(s *cliState) *cobra.Command {
 
 			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 			defer cancel()
+
+			// renderStream is the one place the post-collection stages are
+			// ordered, so the three sources of assets (cache hit, buffered
+			// collect, live stream) can't drift apart. Annotation runs BEFORE
+			// the filter so `--filter tag:cost.basis=unpriceable` can select on
+			// what the annotator just stamped.
+			renderStream := func(in <-chan core.Asset) error {
+				if estimator != nil {
+					in = estimator.Annotate(ctx, in)
+				}
+				if !assetFilter.Empty() {
+					in = assetFilter.Chan(ctx, in)
+				}
+				return renderer.Render(ctx, in, w)
+			}
 
 			cacheMaxAge := v.GetDuration("cache-max-age")
 			cacheWrite := v.GetBool("cache") || cacheMaxAge > 0
@@ -111,7 +135,12 @@ func newAuditCmd(s *cliState) *cobra.Command {
 					slog.Info("serving audit from cache (skipping providers)",
 						"providers", strings.Join(keyProviders, ","),
 						"assets", len(cached), "age", time.Since(runAt).Round(time.Second))
-					return renderer.Render(ctx, assetChan(ctx, assetFilter.Slice(cached)), w)
+					// Annotating on the way OUT of the cache, not on the way in,
+					// is what keeps a cache hit priced with today's book. A price
+					// book has its own vintage, independent of the snapshot's;
+					// baking 2026 prices into a snapshot re-rendered in 2027
+					// would report them as if they were current.
+					return renderStream(assetChan(ctx, cached))
 				}
 			}
 
@@ -141,10 +170,11 @@ func newAuditCmd(s *cliState) *cobra.Command {
 					collected = append(collected, a)
 				}
 				<-errsDone
-				// The cache stores the FULL snapshot; --filter applies at
-				// render time only, so a later run with a different (or no)
-				// filter can still reuse this cache entry.
-				renderErr = renderer.Render(ctx, assetChan(ctx, assetFilter.Slice(collected)), w)
+				// The cache stores the FULL, UNANNOTATED snapshot; --filter and
+				// --cost apply at render time only, so a later run with a
+				// different filter — or a newer price book — can still reuse
+				// this cache entry.
+				renderErr = renderStream(assetChan(ctx, collected))
 				// Cache only a COMPLETE, uncancelled audit: never persist a
 				// snapshot truncated by a provider failure (provErrs) or a ctx
 				// timeout/cancel (ctx.Err) — a later cache hit would otherwise
@@ -153,10 +183,7 @@ func newAuditCmd(s *cliState) *cobra.Command {
 					writeCache(ctx, dbPath, keyProviders, collected)
 				}
 			} else {
-				if !assetFilter.Empty() {
-					assets = assetFilter.Chan(ctx, assets)
-				}
-				renderErr = renderer.Render(ctx, assets, w)
+				renderErr = renderStream(assets)
 				<-errsDone
 			}
 
@@ -211,6 +238,12 @@ func newAuditCmd(s *cliState) *cobra.Command {
 		`Tailscale tailnet to inventory (default: "-", the API token's own tailnet); env TAILSCALE_TAILNET`)
 	cmd.Flags().String("tailscale-api-url", "",
 		"Tailscale control-plane API base URL for self-hosted/Headscale planes (default: Tailscale cloud); env TAILSCALE_API_BASE_URL")
+	// No backticks anywhere in a flag's usage string: cobra's UnquoteUsage
+	// reads the first backticked word as the flag's type name, so "`auditor
+	// cost`" would render as "--cost auditor cost".
+	cmd.Flags().Bool("cost", false,
+		"stamp cost.monthly/currency/basis/detail tags onto each asset from the built-in price book. Per-asset only — Kubernetes pod attribution and per-seat mesh rollups need the 'auditor cost' command. Estimates are list price, marked with a leading ~; nothing unpriced is ever reported as 0")
+	addPriceBookFlags(cmd)
 	cmd.Flags().Bool("cache", false,
 		"persist the audit snapshot to the --db cache after collecting")
 	cmd.Flags().Duration("cache-max-age", 0,

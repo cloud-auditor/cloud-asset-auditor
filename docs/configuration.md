@@ -183,6 +183,9 @@ Collect assets from one or more providers and render them as JSON, CSV, XLSX, or
 | `--tailscale-api-url string`      | `AUDITOR_TAILSCALE_API_URL` / `TAILSCALE_API_BASE_URL` | (Tailscale cloud) | Control-plane API base URL, for self-hosted / Headscale-compatible planes |
 | `--gcp-project string`            | `AUDITOR_GCP_PROJECT`               | `$GOOGLE_CLOUD_PROJECT` | GCP project to inventory via Cloud Asset Inventory. GCP is enabled by `GOOGLE_CLOUD_PROJECT` or `GCP_SCOPE`; auth is ADC. Needs `roles/cloudasset.viewer` + the Cloud Asset API enabled |
 | `--gcp-scope string`              | `AUDITOR_GCP_SCOPE`                 | `$GCP_SCOPE` / the project | Scope override: `projects/<id>`, `folders/<num>`, or `organizations/<num>` (org/folder = every project underneath). For a folder/org scope with gcloud *user* creds, set `GOOGLE_CLOUD_QUOTA_PROJECT` |
+| `--cost`                          | `AUDITOR_COST`                      | `false`       | Stamp `cost.monthly` / `cost.currency` / `cost.basis` / `cost.detail` tags onto each asset from the built-in price book. Per-asset only — see [`auditor cost`](#audit---cost) |
+| `--price-book strings`            | `AUDITOR_PRICE_BOOK`                | (built-in)    | Price-book YAML merged over the built-in book (repeatable; later files win by rate id / rule type) |
+| `--hours-per-month float`         | `AUDITOR_HOURS_PER_MONTH`           | (book's own, `730`) | Override hours in a billing month for hourly rates |
 | `--cache`                         | `AUDITOR_CACHE`                     | `false`       | Persist the audit snapshot to the `--db` SQLite cache after collecting |
 | `--cache-max-age duration`        | `AUDITOR_CACHE_MAX_AGE`             | `0`           | Reuse a cached snapshot from `--db` instead of running providers when one for the same provider set is newer than this (`0` = always run live; implies `--cache`). Avoids re-pulling every run |
 
@@ -356,6 +359,110 @@ auditor diff --exit-code old.json new.json   # CI gate
 | `-o`, `--output string` | `table`  | `table`, `json`, `markdown` |
 | `--output-file string`  | stdout   | `-` is treated as stdout |
 | `--exit-code`           | `false`  | Exit `1` when any drift is found, `0` when clean (mirrors `git diff --exit-code`) |
+
+`cost.*` tags are **excluded from the comparison** along with `Raw` and
+`CreatedAt`. They are computed by this tool from a price book rather than read
+from the provider, so they move whenever the book's vintage does — diffing
+them would report drift on every asset in an unchanged tenancy. Your own
+cost-allocation tags (`cost-center`, `costcenter`, …) are ordinary provider
+metadata and *are* compared; only the reserved `cost.` prefix is skipped.
+
+---
+
+## `auditor cost`
+
+Price the inventory against a public list-price book and report the total, the
+biggest line items, and everything that could not be priced.
+
+`--include-raw` is forced on internally, like `topology` and `reach`:
+Kubernetes pod attribution reads `resources.requests` out of `Raw`, and volume
+sizes come from there when the provider didn't tag them.
+
+```bash
+auditor cost                                    # live audit, table report
+auditor cost --provider oci --group-by region
+auditor cost --from-snapshot assets.json -o json
+auditor cost --rates                            # print the price book; no audit, no credentials
+auditor cost --top 0 --show-unpriced            # every asset, priced or not
+```
+
+| Flag | Default | Notes |
+| ---- | ------- | ----- |
+| `-o`, `--output string` | `table` | `table`, `json`, `csv`, `markdown` |
+| `--output-file string` | stdout | `-` is treated as stdout |
+| `--group-by string` | `provider` | Roll totals up by `provider`, `type`, `region`, `account`, or `tag:KEY` |
+| `--top int` | `20` | List the N most expensive assets (`0` = all) |
+| `--show-unpriced` | `false` | List every metered/unknown asset individually instead of counting them by type |
+| `--filter stringArray` | (none) | Price matching assets only; same syntax as `audit --filter`, repeatable (ANDed) |
+| `--rates` | `false` | Print the loaded price book (rate card, tier notes, book vintages) and exit — no audit, no credentials |
+| `--price-book strings` | (built-in) | Price-book YAML merged over the built-in book; repeatable, later files win by rate id / rule type |
+| `--hours-per-month float` | (book's own, `730`) | Override hours in a billing month for hourly rates. `730` is `365*24/12`; OCI's own free tiers are quoted against `744` |
+| `--refresh-prices` | `false` | Fetch current OCI list prices before pricing. A network call to Oracle's public price API — **never implicit**, because this binary runs in CI and as a CronJob |
+| `--from-snapshot string` | (live audit) | Price a saved `audit -o json` snapshot instead of running providers |
+| `--provider strings`, `--oci-*`, `--kube-*`, `--gcp-*`, `--tailscale-*`, `--netbird-*`, `--max-concurrency`, `--timeout` | | Same as `audit` |
+
+**There is no `--exit-code` and no budget threshold, deliberately.** Failing a
+pipeline on an estimate teaches people the estimate is authoritative. Gate on
+`reach --exposed` and `diff`, which are statements of fact.
+
+### What this is not
+
+The report prints its full disclaimer above the first table; the short version:
+
+- **It is a list-price estimate, not an invoice.** Universal Credits,
+  Enterprise Agreements, and partner discounts are invisible to this tool.
+- **Free-tier allowances are not applied.** They are *tenancy-wide monthly*
+  tiers, and a per-asset estimator cannot know where a given resource falls in
+  one, so every rate in the book is the **marginal** rate — the price of the
+  *next* unit. This tool therefore over-estimates small tenancies.
+- **Egress, requests, and consumption are not modelled** for any provider.
+- **EUR (NetBird) and USD are reported separately and never combined.** No
+  exchange rate is applied anywhere in this tool.
+
+**Nothing unpriced is ever reported as `0`.** A resource whose billing is
+consumption-based reads `metered`; one the book has no rule for reads
+`unknown`. The only path to `0.00` is a stopped instance, and it always carries
+the explanation. `$0.00` is a real price in OCI's feed (an Always Free tier),
+so zero and unknown have to be impossible to confuse.
+
+A leading `~` means the number was computed by this tool from list price; a
+number without one came from the provider's own billing API. It is the one
+disclosure that survives copy-paste, a screenshot, and a CSV.
+
+### `audit --cost`
+
+`auditor audit --cost` stamps four tags onto each asset as it streams:
+
+| Tag | Value |
+| --- | ----- |
+| `cost.monthly` | `"18.25"` · `"~18.25"` · `"unknown"` · `"metered"` — never `"0"` for "we don't know" |
+| `cost.currency` | `"USD"`, `"EUR"` — always set when `cost.monthly` is numeric |
+| `cost.basis` | `measured` \| `inferred` \| `assumed` \| `unpriceable` \| `unknown` |
+| `cost.detail` | One greppable string carrying the SKUs, rates, and quantities used |
+
+They ride in `Asset.Tags`, so they flow through every renderer (JSON, CSV, the
+XLSX tag columns, HTML), the `--db` cache, and `/api/v1/audit` for free, and
+`--filter tag:cost.basis=unknown` works with no extra plumbing.
+
+This is **per-asset annotation only** — Kubernetes pod attribution needs every
+Node before it can price any Pod, and per-seat mesh pricing needs the count of
+users before a figure means anything. Both are whole-set reductions that cannot
+stream, so they live in `auditor cost`. The command says so on stderr once per
+run.
+
+Off by default: a plain `auditor audit` emits exactly the bytes it did before
+this feature existed.
+
+| Flag | Default | Notes |
+| ---- | ------- | ----- |
+| `--cost` | `false` | Stamp the `cost.*` tags |
+| `--price-book strings` | (built-in) | As above |
+| `--hours-per-month float` | (book's own, `730`) | As above |
+
+The `--db` cache stores the **unannotated** snapshot, and annotation happens on
+the way out of it. A price book has its own vintage, independent of the
+snapshot's; baking today's prices into a snapshot re-rendered next year would
+present them as current. A cache hit is priced with today's book instead.
 
 ---
 
