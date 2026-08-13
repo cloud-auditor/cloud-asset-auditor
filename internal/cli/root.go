@@ -94,6 +94,16 @@ func newRootCmd() *cobra.Command {
 			}
 			loadVaultedSecrets(cmd.Context(), v.GetString("db"))
 
+			// Retention is a property of the database, not of one command:
+			// `audit --cache` enforces it on write and `cache prune` applies
+			// it on demand, so it binds here with --db rather than on audit.
+			for _, name := range []string{"cache-retain", "cache-retain-age"} {
+				if err := v.BindPFlag(name, cmd.Root().PersistentFlags().Lookup(name)); err != nil {
+					return fmt.Errorf("bind %s: %w", name, err)
+				}
+			}
+			setCacheRetention(retentionFromViper(v))
+
 			// --demo installs the built-in synthetic provider. It is
 			// registered here rather than from an init() so "demo" never
 			// appears in core.Registered() on a normal run — fabricated
@@ -114,6 +124,13 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().String("tracing", "off", "tracing mode: off|stdout|otlp (honors OTEL_EXPORTER_OTLP_* env vars)")
 	cmd.PersistentFlags().String("db", store.DefaultPath(),
 		"SQLite database for the audit cache + secrets vault (env AUDITOR_DB)")
+	// Both default to 0 = keep everything. Nothing deletes snapshot history
+	// unless the operator asks: the database is its only copy, and a lost
+	// baseline is only discovered when someone needs it.
+	cmd.PersistentFlags().Int("cache-retain", 0,
+		"keep at most this many cached snapshots per provider set, pruned after each --cache write (0 = keep every snapshot; env AUDITOR_CACHE_RETAIN)")
+	cmd.PersistentFlags().Duration("cache-retain-age", 0,
+		"delete cached snapshots older than this after each --cache write, e.g. 2160h for 90 days (0 = keep every snapshot; env AUDITOR_CACHE_RETAIN_AGE)")
 	cmd.PersistentFlags().Bool("demo", false,
 		"run against a built-in synthetic multi-cloud inventory instead of real providers — needs no credentials (env AUDITOR_DEMO)")
 
@@ -123,7 +140,8 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newProvidersCmd(state))
 	cmd.AddCommand(newTopologyCmd(state))
 	cmd.AddCommand(newReachCmd(state))
-	cmd.AddCommand(newDiffCmd())
+	cmd.AddCommand(newDiffCmd(state))
+	cmd.AddCommand(newHistoryCmd(state))
 	cmd.AddCommand(newSecretsCmd(state))
 	cmd.AddCommand(newCacheCmd(state))
 	cmd.AddCommand(newCheckCmd(state))

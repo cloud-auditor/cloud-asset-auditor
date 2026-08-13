@@ -212,15 +212,62 @@ Ingress / HTTPRoute payloads); the rendered output omits `raw`.
 | Flag                    | Default        | Notes |
 | ----------------------- | -------------- | ----- |
 | `--provider strings`    | (all)          | Comma-separated subset |
-| `--from string`         | (live audit)   | Build the graph from a saved `audit -o json` snapshot (array or NDJSON) instead of running providers — instant; pair the snapshot with `--include-raw` for the K8s payload resolvers |
+| `--from-snapshot string` | (live audit)  | Build the graph from a saved `audit -o json` snapshot (array or NDJSON) instead of running providers — instant; pair the snapshot with `--include-raw` for the K8s payload resolvers |
 | `-o`, `--output string` | `json`         | `json`, `dot`, `mermaid`, `d2` (d2lang.com), `graphml` (yEd / Gephi / Cytoscape), `excalidraw`, `html` (standalone interactive force-directed viewer — one self-contained file) |
 | `--group-by string`     | (flat)         | Cluster nodes into `provider`, `account`, or `region` subgraphs in the `dot` / `mermaid` / `d2` renderers (ignored by the others) |
 | `--detail string`       | `low`          | Diagram detail. `low` = every asset. `medium` = one node per group + resource type. `high` = one node per group — the high-level network diagram. `medium`/`high` bucket by `--group-by` (defaulting to `provider`) |
 | `--output-file string`  | stdout         | `-` is treated as stdout |
 | `--hostname strings`    | (all)          | Trace only the connected component(s) reachable from these DNS hostnames |
 | `--include-orphans`     | `false`        | Keep asset nodes that have no edges |
+| `--orphans`             | `false`        | Report the degree-0 nodes instead of rendering the graph. Output is `table` (default) or `json` via `-o`; graph formats are rejected. Buckets by `--group-by` (default `provider`), sorted by count. Requires `--detail low` — at `medium`/`high` the collapse drops intra-group edges, so a collapsed node reads as degree 0 while everything inside it is connected, and the command refuses rather than print a wrong number. Composes with `--hostname` and `--filter`, each of which adds a caveat line explaining how it moved the count |
 | `--max-concurrency int` | `5`            | Mirrors `audit --max-concurrency` |
 | `--timeout duration`    | `10m`          | Overall audit + resolve timeout |
+
+### `--orphans`: what the graph connects to nothing
+
+```bash
+auditor topology --orphans                          # table, with the caveat
+auditor topology --orphans --group-by region -o json
+```
+
+Lists the assets no inferred relationship touches, grouped by provider (or
+`--group-by account|region`) and type, biggest bucket first. Types the graph
+*does* relate elsewhere are separated from types no resolver models at all, so
+the three load balancers that genuinely lost their DNS records aren't buried
+under five hundred ConfigMaps.
+
+**This is not a list of unused resources.** A degree-0 node means "nothing this
+tool inferred touches it", which is equally explained by a resolver that needed
+`--include-raw`, a provider that was skipped or lacked token scope, or a
+relationship no resolver models. The report says so before it says anything
+else — read it. Deleting a resource because this named it is a genuine way to
+cause an outage. There is deliberately no `--exit-code`.
+
+#### Why is X reported as an orphan?
+
+These are the four real causes, in the order they occur in practice:
+
+1. **The snapshot has no `Raw`.** `topology` forces `--include-raw` on a live
+   audit, but `--from-snapshot` uses whatever the file has. Without it the
+   Ingress/HTTPRoute-backend, Service-selector and NetworkPolicy resolvers are
+   no-ops and most of a cluster looks orphaned. Re-collect with
+   `audit --include-raw -o json`. The report detects this two ways: no payloads
+   anywhere, **and** payloads present but none on the types that need them (a
+   snapshot filtered to drop the large Kubernetes blobs) — the second case names
+   the starved types explicitly, because that is where the count is most
+   misleading. An unreadable Service selector also orphans every Pod it would
+   have selected, so a large `v1.Pod` bucket is usually a symptom of that rather
+   than a finding of its own.
+2. **The other end wasn't collected.** A Cloudflare DNS record can only join to
+   a load balancer if OCI also ran. A `Zone`+`Zone.DNS`-only Cloudflare token
+   returns *zero* accounts rather than a 403, silently zeroing ten collectors —
+   see [providers.md](./providers.md) "Why am I only getting DNS?".
+3. **`--filter` or `--provider` narrowed the input.** The graph is built from
+   what survives the filter, so an excluded far end manufactures an orphan.
+4. **No resolver models that relationship.** Nine edge kinds exist. There is no
+   resolver for GCP disks, for IAM, for object storage, or for OCI
+   instance→subnet (the compute collector records no VNIC/subnet OCID). These
+   land in the report's second section and are noise by construction.
 
 ### High-level vs low-level diagrams
 
@@ -359,6 +406,10 @@ auditor diff --exit-code old.json new.json   # CI gate
 | `-o`, `--output string` | `table`  | `table`, `json`, `markdown` |
 | `--output-file string`  | stdout   | `-` is treated as stdout |
 | `--exit-code`           | `false`  | Exit `1` when any drift is found, `0` when clean (mirrors `git diff --exit-code`) |
+| `--since string`        | (none)   | Diff a **stored** snapshot instead of two files — see below |
+| `--against string`      | `newest` | With `--since`: `newest` (latest stored snapshot) or `live` (collect now) |
+| `--providers strings`   | (auto)   | With `--since`: pin the comparison to the snapshot series for this exact provider set, instead of whichever series the baseline happens to land in |
+| `--timeout duration`    | `10m`    | With `--against live` only |
 
 `cost.*` tags are **excluded from the comparison** along with `Raw` and
 `CreatedAt`. They are computed by this tool from a price book rather than read
@@ -366,6 +417,88 @@ from the provider, so they move whenever the book's vintage does — diffing
 them would report drift on every asset in an unchanged tenancy. Your own
 cost-allocation tags (`cost-center`, `costcenter`, …) are ordinary provider
 metadata and *are* compared; only the reserved `cost.` prefix is skipped.
+
+### `--since`: diffing against your own history
+
+`auditor audit --cache` stores every snapshot in the `--db` database. `--since`
+picks one of them as the baseline, so you don't have to have kept files around:
+
+```bash
+auditor audit --cache -o json > /dev/null   # on a schedule; builds the history
+
+auditor diff --since 30d                    # a month of drift
+auditor diff --since 720h                   # same, as a Go duration
+auditor diff --since 2026-06-01             # from a date (local midnight)
+auditor diff --since 2026-06-01T09:00:00Z   # from an exact instant
+auditor diff --since 7d --against live      # baseline vs a fresh collection
+auditor diff --since 7d --exit-code         # CI gate on a week of drift
+```
+
+`--since` and two file arguments are **two ways to name the same pair and
+cannot be mixed** — passing both is an error rather than a guess.
+
+Four rules keep the answer honest, all of them about not reporting confident,
+wrong drift:
+
+- **The baseline is the newest snapshot taken at or before that instant**,
+  never one taken after it. `--since 30d` compared against a snapshot from 25
+  days ago would report five days of drift as if it were thirty.
+- **When nothing is that old the command fails and says what it does have**
+  (id, timestamp, age, provider set, asset count), rather than falling back to
+  the oldest snapshot.
+- **Both sides come from the same provider set.** A one-off
+  `--provider netbird --cache` run is never used as the "current" side of a
+  full audit's baseline; every Cloudflare and OCI asset would read as removed.
+  The command prints which two snapshots it chose above the report (in `table`
+  and `markdown`; `json` stays a clean machine document).
+- **A comparison scoped to one series says which series it ignored.** The
+  baseline is picked by timestamp across every series in the store, so a store
+  holding both a nightly full audit and an hourly `--provider netbird` run can
+  land the baseline in the narrow series — a complete, self-consistent
+  comparison that nonetheless answers a much narrower question than the one
+  asked, possibly with `No drift`. When more than one series exists the report
+  names the ones it did not examine and how recent they are. Pin the one you
+  mean with `--providers`.
+
+`--against live` collects from exactly the baseline's provider set. If any
+provider fails, the command **refuses to report** rather than showing that
+provider's whole inventory as removed — the same rule `audit --cache` uses
+before persisting a snapshot. Provider knobs (`--oci-profile`, `--kube-context`,
+…) are not flags here; put them in the config file or `AUDITOR_*` env so the
+live run is scoped the same way the snapshot was.
+
+---
+
+## `auditor history`
+
+An asset's timeline across the stored snapshots: when it appeared, when it was
+last seen, whether it is in the newest snapshot, and which fields changed
+between which runs.
+
+```bash
+auditor history p-abc123                  # by id
+auditor history 'ocid1.instance.*'        # by glob
+auditor history '*-prod' -o json
+```
+
+| Flag                    | Default | Notes |
+| ----------------------- | ------- | ----- |
+| `-o`, `--output string` | `table` | `table`, `json` |
+| `--output-file string`  | stdout  | `-` is treated as stdout |
+| `--limit int`           | `25`    | Report at most this many matching assets (`0` = no limit); a capped report says it capped |
+
+Selectors are **case-insensitive globs matched against both the asset id and
+its name** — the same grammar `auditor reach --from` uses.
+
+Events are `appeared`, `changed` (with the field-level before/after, computed
+by the same `internal/diff` comparison `auditor diff` uses), `disappeared`, and
+`reappeared` (which also lists what changed while it was gone).
+
+**Absence is only read from snapshots that could have contained the asset.** A
+snapshot taken with `--provider netbird` says nothing about whether a
+Cloudflare zone still exists, so those runs are skipped rather than counted as
+the asset having disappeared. The report states how many of the covering
+snapshots the asset was actually observed in.
 
 ---
 
@@ -539,6 +672,8 @@ binary keeps working) backs two features:
 | Flag / env                       | Default                                  | Notes |
 | -------------------------------- | ---------------------------------------- | ----- |
 | `--db string` / `AUDITOR_DB`     | `<user-config-dir>/auditor/auditor.db`   | Persistent (all subcommands). The file is created on first write with `0600` perms |
+| `--cache-retain int` / `AUDITOR_CACHE_RETAIN` | `0` (keep everything)       | Keep at most N snapshots **per provider set**, enforced after each `--cache` write |
+| `--cache-retain-age duration` / `AUDITOR_CACHE_RETAIN_AGE` | `0` (keep everything) | Delete snapshots older than this, enforced after each `--cache` write |
 | `AUDITOR_SECRETS_PASSPHRASE`     | (none)                                   | Passphrase that encrypts/decrypts the secrets vault (AES-256-GCM, scrypt-derived key). Required for `secrets` ops and to load vaulted creds at startup |
 
 **Audit cache** — `auditor audit --cache` writes each snapshot; `--cache-max-age 1h`
@@ -546,6 +681,43 @@ serves the most recent snapshot for the same provider set if it's younger than
 the cutoff, skipping the providers entirely (instant, zero API calls). The cache
 key is the canonicalized provider set, so `--provider netbird` and a full audit
 don't collide.
+
+Snapshots also *are* the history: `auditor diff --since` and `auditor history`
+read them, and `auditor cache show ID` re-emits one as `audit -o json`.
+
+### Retention
+
+**Nothing is deleted by default.** Both retention knobs default to `0` = keep
+everything, and that is deliberate: this database is the only copy of the
+history, a deleted snapshot cannot be recomputed from anything, and the moment
+you notice it is gone is the moment you needed the baseline. Disk is
+recoverable; history is not. So growth is made *visible* instead — `cache list`
+prints the footprint, and an unconfigured cache logs a one-time hint once it
+passes 50 snapshots — and deletion is something you opt into.
+
+When you do opt in:
+
+```bash
+# Standing policy (also AUDITOR_CACHE_RETAIN / _AGE or the config file).
+auditor audit --cache --cache-retain 30                  # 30 snapshots per provider set
+auditor audit --cache --cache-retain-age 2160h           # nothing older than 90 days
+auditor audit --cache --cache-retain 30 --cache-retain-age 2160h  # both must hold
+
+# One-off, with a preview first.
+auditor cache prune --keep 30 --dry-run
+auditor cache prune --max-age 168h
+auditor cache prune                    # apply the configured policy
+```
+
+`--cache-retain` / `--keep` count **within a provider set**, because each set is
+an independent series: an hourly `--provider netbird` run would otherwise evict
+every weekly full audit long before N of the full audits had accumulated.
+`--cache-retain-age` / `--max-age` are global — "I don't care about anything
+older than D" is a statement about time, not about a series. Given both, a
+snapshot has to survive both.
+
+`auditor cache prune` with neither flag applies the configured policy, and
+refuses to run when there is none rather than inventing a window.
 
 ## `auditor secrets`
 

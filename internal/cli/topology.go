@@ -42,6 +42,12 @@ Examples:
   # Build from a saved snapshot instead of a live audit (instant; pair
   # with 'audit -o json --include-raw' so the K8s resolvers see payloads):
   auditor topology --from-snapshot assets.json -o html > topology.html
+
+  # Report what the graph connects to nothing, instead of drawing it. Read
+  # the caveat it prints: an orphan is a gap in the inferred graph, not a
+  # verdict on the resource.
+  auditor topology --orphans
+  auditor topology --orphans --group-by region -o json
 `,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := s.v.BindPFlags(cmd.Flags()); err != nil {
@@ -53,6 +59,7 @@ Examples:
 			outFile := v.GetString("output-file")
 			hostnames := v.GetStringSlice("hostname")
 			includeOrphans := v.GetBool("include-orphans")
+			orphanReport := v.GetBool("orphans")
 			groupBy := v.GetString("group-by")
 
 			detail, err := topology.ParseDetail(v.GetString("detail"))
@@ -60,9 +67,23 @@ Examples:
 				return err
 			}
 
-			renderer, err := topology.New(format, topology.WithGroupBy(topology.RenderGroupBy(detail, groupBy)))
-			if err != nil {
-				return err
+			// The orphan report replaces the diagram rather than annotating it,
+			// so it takes over format selection and the renderer is never built.
+			var renderer topology.Renderer
+			if orphanReport {
+				if detail != topology.DetailLow {
+					return fmt.Errorf(
+						"--orphans cannot be combined with --detail %s: collapsing replaces every asset "+
+							"with one summary node per group and drops the edges that stayed inside a group, "+
+							"so a collapsed node reads as having no edges while every asset inside it is "+
+							"connected. Re-run with --detail low (the default)", detail)
+				}
+				format = orphanFormat(cmd, format)
+			} else {
+				renderer, err = topology.New(format, topology.WithGroupBy(topology.RenderGroupBy(detail, groupBy)))
+				if err != nil {
+					return err
+				}
 			}
 
 			assetFilter, err := filter.Parse(v.GetStringSlice("filter"))
@@ -85,6 +106,23 @@ Examples:
 			if len(hostnames) > 0 {
 				topo = topo.FilterByHostname(hostnames)
 			}
+
+			if orphanReport {
+				// Reported off the graph as built — before DropOrphans, whose
+				// keep set is this report's exact complement, and before
+				// Collapse, which the --detail guard above already ruled out.
+				report := topo.Orphans(groupBy)
+				report.Caveat = append(report.Caveat,
+					narrowingCaveats(hostnames, v.GetStringSlice("filter"))...)
+				if err := topology.RenderOrphans(report, format, w); err != nil {
+					return err
+				}
+				if len(provErrs) > 0 {
+					return errors.Join(append([]error{ErrPartial}, provErrs...)...)
+				}
+				return nil
+			}
+
 			if !includeOrphans {
 				topo = topo.DropOrphans()
 			}
@@ -109,6 +147,8 @@ Examples:
 	cmd.Flags().StringArray("filter", nil,
 		`build the graph from matching assets only: key=value[,value...] / key!=... with key provider|account|region|type|id|name|status|tag:KEY and glob values; repeatable (ANDed)`)
 	cmd.Flags().Bool("include-orphans", false, "include asset nodes that have no edges")
+	cmd.Flags().Bool("orphans", false,
+		"report the assets the graph connects to nothing instead of drawing it (table|json; groups by --group-by, needs --detail low)")
 	cmd.Flags().String("group-by", "",
 		"cluster nodes by provider|account|region in the dot/mermaid/d2/drawio renderers (default: flat)")
 	cmd.Flags().String("detail", "low",
@@ -116,4 +156,52 @@ Examples:
 
 	addGraphSourceFlags(cmd)
 	return cmd
+}
+
+// narrowingCaveats names the flags that were applied *before* the orphan count
+// was taken, because each one moves the number in a direction a reader would
+// otherwise attribute to the estate.
+//
+// Both distortions point opposite ways, which is why neither can be left
+// unsaid: --hostname deflates the count almost to zero, and --filter inflates
+// it by cutting the far end off relationships that do exist.
+func narrowingCaveats(hostnames, filters []string) []string {
+	var out []string
+	if len(hostnames) > 0 {
+		out = append(out, "--hostname narrowed the graph to the component reachable from the named "+
+			"record(s) before this report ran. Everything that survives that filter has an edge by "+
+			"construction, apart from a matched record that points at nothing — so a low count here "+
+			"is a property of the filter and says nothing about the rest of the estate.")
+	}
+	if len(filters) > 0 {
+		out = append(out, "--filter was applied before the graph was built, so any relationship whose "+
+			"far end the filter excluded could not be inferred, and its near end is counted here as "+
+			"an orphan. Re-run without --filter to tell the two apart.")
+	}
+	return out
+}
+
+// orphanFormat picks the output format for --orphans.
+//
+// `topology` defaults -o to json because its product is a diagram to pipe
+// somewhere. An orphan report's product is a warning: the list of counts is
+// worthless, and actively dangerous, without the paragraphs explaining that a
+// degree-0 node is a gap in the inferred graph and not a verdict on the
+// resource. Both formats carry that text, but only the table puts it in front
+// of a human by default — so an unspecified -o means table here, and an
+// explicit one is honoured as given (including an unsupported one, which
+// RenderOrphans rejects with a message naming the two that work).
+//
+// Deliberately no --exit-code: gating CI on this number would institutionalise
+// exactly the reading the report spends its first paragraph disowning.
+func orphanFormat(cmd *cobra.Command, resolved string) string {
+	if cmd.Flags().Changed("output") {
+		return resolved
+	}
+	if def := cmd.Flags().Lookup("output").DefValue; resolved == def {
+		// Unset on the command line and unchanged by config/env: take the
+		// orphan default rather than topology's diagram default.
+		return "table"
+	}
+	return resolved
 }

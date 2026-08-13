@@ -17,8 +17,14 @@ import (
 // the audit cache (audits + assets tables) and the secrets vault (secrets
 // table) — that happen to share one file so a user has a single DB to manage.
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
+
+// Path is the database file this Store was opened from. Error messages about
+// missing history name it — "no snapshots stored" is unactionable until the
+// user knows which file was looked in, and --db/$AUDITOR_DB make that vary.
+func (s *Store) Path() string { return s.path }
 
 const schema = `
 CREATE TABLE IF NOT EXISTS audits (
@@ -41,6 +47,13 @@ CREATE TABLE IF NOT EXISTS assets (
 	raw        BLOB                          -- JSON (only when --include-raw)
 );
 CREATE INDEX IF NOT EXISTS idx_assets_audit ON assets(audit_id);
+-- idx_assets_audit answers "load one snapshot". The history queries ask the
+-- perpendicular question — follow ONE asset across every snapshot — which
+-- that index cannot serve at all: without this one, AssetTimeline scans every
+-- asset row of every snapshot (assets × snapshots), so on a 50k-asset estate
+-- it degrades linearly with how much history you have kept. IF NOT EXISTS
+-- means existing databases pick it up on the next Open.
+CREATE INDEX IF NOT EXISTS idx_assets_asset_id ON assets(asset_id);
 CREATE TABLE IF NOT EXISTS secrets (
 	name       TEXT PRIMARY KEY,
 	ciphertext BLOB    NOT NULL,
@@ -89,7 +102,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("store: migrate: %w", err)
 	}
 	_ = os.Chmod(path, 0o600) // best-effort; new files are created 0600 anyway
-	return &Store{db: db}, nil
+	return &Store{db: db, path: path}, nil
 }
 
 // Close releases the database handle.

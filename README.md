@@ -115,9 +115,12 @@ export TAILSCALE_API_KEY=tskey-api-xxxxxxxxxxxx
 ./bin/auditor audit --include-raw -o json                        # any provider, with full SDK payloads
 
 # Local SQLite (--db, default ~/.config/auditor/auditor.db) backs two things:
-#  1) An audit cache so you don't re-pull every run:
+#  1) An audit cache — and, because every snapshot is kept, your history:
 ./bin/auditor audit --provider netbird --cache -o json           # write the snapshot
 ./bin/auditor audit --provider netbird --cache-max-age 1h -o json # reuse it if <1h old (skips the API)
+./bin/auditor cache list                                         # what is stored, and what it costs on disk
+./bin/auditor diff --since 30d                                   # a month of drift, no files kept
+./bin/auditor history 'ocid1.instance.*'                         # one asset's timeline across snapshots
 #  2) An encrypted secrets vault (AES-256-GCM) so creds load automatically:
 export AUDITOR_SECRETS_PASSPHRASE='choose-a-passphrase'
 ./bin/auditor secrets set NETBIRD_API_TOKEN nbp_xxx              # stored encrypted at rest
@@ -356,6 +359,32 @@ The subcommand forces `--include-raw` on providers internally so the
 Kubernetes resolvers can parse Ingress / HTTPRoute / Service payloads.
 The rendered output omits `raw` to stay readable.
 
+### `--orphans`: what the graph connects to nothing
+
+```bash
+auditor topology --orphans                          # table, with the caveat
+auditor topology --orphans --group-by region -o json
+```
+
+Lists the assets no inferred relationship touches, grouped by provider (or
+`--group-by account|region`) and type, biggest bucket first. Types the graph
+*does* relate elsewhere are separated from types no resolver models at all, so
+the three load balancers that genuinely lost their DNS records aren't buried
+under five hundred ConfigMaps.
+
+**This is not a list of unused resources.** A degree-0 node means "nothing this
+tool inferred touches it", which is equally explained by a resolver that needed
+`--include-raw`, a provider that was skipped or lacked token scope, or a
+relationship no resolver models. The report says so before it says anything
+else — read it. Deleting a resource because this named it is a genuine way to
+cause an outage. There is deliberately no `--exit-code`.
+
+The two cases that most often inflate the count are detected and named in the
+output: a snapshot with no payloads at all, and a snapshot carrying payloads for
+some providers but none for the Kubernetes types whose resolvers parse them.
+See [docs/configuration.md](./docs/configuration.md#why-is-x-reported-as-an-orphan)
+for the four real causes.
+
 The Cytoscape.js interactive view init-plan.md §3 Phase 10 envisioned
 is deliberately not vendored — same rationale as the vanilla-JS
 frontend choice in Phase 5. Instead, the web UI's **Topology tab**
@@ -417,6 +446,74 @@ auditor diff --exit-code monday.json friday.json
 Identity is `(provider, id)`; `Raw`, `CreatedAt`, and the `cost.*` tags are
 deliberately excluded from comparison (opt-in noise / immutable-ish /
 computed by this tool rather than read from the provider).
+
+### Against your own history
+
+If you already run `audit --cache` on a schedule, every snapshot is in the
+`--db` database and you don't need to keep files at all:
+
+```bash
+auditor diff --since 30d                    # vs the newest stored snapshot
+auditor diff --since 2026-06-01             # from a date, or an RFC3339 instant
+auditor diff --since 7d --against live      # baseline vs a fresh collection
+auditor diff --since 30d --providers oci    # pin which snapshot series to read
+```
+
+The baseline is the newest snapshot **at or before** that point — never one
+taken after it — and when nothing is that old the command says how far back
+the history actually goes instead of silently comparing against something
+else. Both sides always come from the same provider set, so a one-off
+`--provider netbird` snapshot can't be diffed against a full audit.
+
+If the database holds several independent series (say a nightly full audit
+*and* an hourly `--provider netbird` run), the baseline can land in the narrow
+one — a self-consistent comparison that quietly answers a much narrower
+question, possibly with `No drift`. The report names the series it did not
+examine; `--providers` pins the one you meant.
+
+## Asset history
+
+`auditor history` follows one asset through the stored snapshots:
+
+```bash
+auditor history p-abc123
+auditor history '*-prod'                    # case-insensitive glob on id and name
+auditor history 'ocid1.instance.*' -o json
+```
+
+```
+netbird/netbird.peer p1 (gw-prod-2)
+  first seen   2026-07-04T09:23:38Z  (snapshot #1)
+  last seen    2026-08-03T09:23:38Z  (snapshot #4, 10d ago)
+  in newest    yes  (snapshot #4 from 2026-08-03T09:23:38Z)
+  observed in  3 of 4 snapshot(s) covering netbird
+
+  2026-07-04T09:23:38Z  #1    appeared
+  2026-07-14T09:23:38Z  #2    changed since #1
+        status: "connected" -> "disconnected"
+  2026-07-24T09:23:38Z  #3    disappeared (last seen in #2)
+  2026-08-03T09:23:38Z  #4    reappeared since #2
+        name: "gw-prod" -> "gw-prod-2"
+        tags.ip: "100.64.0.1" -> "100.64.0.9"
+```
+
+Field changes come from the same comparison `auditor diff` uses. Absence is
+only read from snapshots that *could* have contained the asset — a
+netbird-only run is not evidence that a Cloudflare zone was deleted.
+
+### Retention
+
+Snapshots accumulate, and on a 50k-asset estate audited hourly that is real
+disk. **Nothing is deleted by default** — the database is the only copy of the
+history and a deleted snapshot cannot be recomputed — so `cache list` shows the
+footprint and you opt in:
+
+```bash
+auditor cache list                                  # snapshots + rows + bytes on disk
+auditor cache prune --keep 30 --dry-run             # preview, delete nothing
+auditor audit --cache --cache-retain 30             # standing policy, per provider set
+auditor audit --cache --cache-retain-age 2160h      # or: nothing older than 90 days
+```
 
 ## Cost estimation
 
